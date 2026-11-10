@@ -1,0 +1,22 @@
+{
+  "name": "moodle-instructor",
+  "productName": "Moodle Instructor",
+  "version": "0.3.4",
+  "private": true,
+  "description": "Moodle instructor workspace with sandbox and read-only live testing",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bizzomephisto/moodleboss"
+  },
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "package": "bash scripts/package.sh"
+  },
+  "dependencies": {
+    "cheerio": "1.1.2"
+  },
+  "devDependencies": {
+    "electron": "45.1.0"
+  }
+}
