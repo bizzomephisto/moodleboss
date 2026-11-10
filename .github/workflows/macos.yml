@@ -30,7 +30,7 @@ jobs:
           app="$check_dir/MoodleBOSS.app"
           binary="$app/Contents/MacOS/Electron"
           codesign --verify --deep --strict "$app"
-          lipo -verify_arch "$(uname -m)" "$binary"
+          lipo "$binary" -verify_arch "$(uname -m)"
           "$binary" --user-data-dir="$check_dir/profile" --remote-debugging-port=0 >"$check_dir/app.log" 2>&1 &
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true; cat "$check_dir/app.log"; rm -rf "$check_dir"' EXIT
