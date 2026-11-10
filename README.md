@@ -5,12 +5,18 @@ test mode for live Moodle sites.
 
 ## Run a portable build
 
-Get the Linux or Windows x64 archive from [GitHub Releases](https://github.com/bizzomephisto/moodleboss/releases).
+Get the archive for your system from [GitHub Releases](https://github.com/bizzomephisto/moodleboss/releases).
 
 | System | Open after extracting the entire archive |
 | --- | --- |
 | Linux x64 | `MoodleBOSS` |
 | Windows x64 | `MoodleBOSS.exe` |
+| macOS Apple Silicon (arm64) | `MoodleBOSS.app` |
+| macOS Intel (x64) | `MoodleBOSS.app` |
+
+The Mac builds are ad hoc signed. If macOS blocks the app after the first
+launch attempt, open **System Settings → Privacy & Security** and select
+**Open Anyway** for MoodleBOSS.
 
 Keep the executable with the files extracted beside it. The archives include
 Electron and the app dependencies. Saved drafts and the Moodle session live in
@@ -22,7 +28,7 @@ Start the existing sandbox on Linux with `~/moodle-sandbox/sandbox start`, then
 choose **Connect Moodle** in the app. MoodleBOSS connects to
 `http://127.0.0.1:8787`.
 
-To use that same sandbox from Windows, open PowerShell and run the following
+To use that same sandbox from Windows or macOS, open PowerShell or Terminal and run the following
 with an existing SSH account on the Linux host. Replace `user@linux-host` with
 your Linux username and the host's address.
 
@@ -59,3 +65,5 @@ on this computer for each Moodle site and account.
 On Linux, install the project dependencies with `npm ci`, then run
 `npm run package`. The build uses Bash, `unzip`, `zip`, and `tar` and writes
 both archives to `dist/`. Pass `-- linux` or `-- windows` to build one archive.
+On macOS, run `npm ci` and `npm run package -- mac` to build the archive for
+that Mac's architecture.

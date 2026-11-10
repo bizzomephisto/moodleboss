@@ -1,0 +1,53 @@
+name: macOS builds
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: npm ci --ignore-scripts
+      - run: npm run package -- mac
+      - name: Launch the extracted app
+        shell: bash
+        run: |
+          set -euo pipefail
+          check_dir="$(mktemp -d)"
+          ditto -x -k dist/MoodleBOSS-*-macos-*.zip "$check_dir"
+          app="$check_dir/MoodleBOSS.app"
+          binary="$app/Contents/MacOS/Electron"
+          codesign --verify --deep --strict "$app"
+          lipo -verify_arch "$(uname -m)" "$binary"
+          "$binary" --user-data-dir="$check_dir/profile" --remote-debugging-port=0 >"$check_dir/app.log" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true; cat "$check_dir/app.log"; rm -rf "$check_dir"' EXIT
+          for attempt in {1..30}; do
+            if [[ -f "$check_dir/profile/DevToolsActivePort" ]]; then
+              port="$(head -n 1 "$check_dir/profile/DevToolsActivePort")"
+              if curl -fsS "http://127.0.0.1:$port/json/list" | grep -q 'instructor://workspace/index.html'; then
+                exit 0
+              fi
+            fi
+            kill -0 "$pid"
+            sleep 1
+          done
+          exit 1
+      - uses: actions/upload-artifact@v6
+        with:
+          name: macos-${{ matrix.arch }}
+          path: dist/MoodleBOSS-*-macos-*.zip
+          if-no-files-found: error
+          compression-level: 0
