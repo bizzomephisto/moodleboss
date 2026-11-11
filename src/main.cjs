@@ -31,6 +31,8 @@ const assetTypes = new Map([
   ['/assignment.js', 'text/javascript'],
 ]);
 const windowSettings = { sandbox: true, contextIsolation: true, nodeIntegration: false };
+const gradingWindows = new WeakMap();
+const openableSubmission = /\.(?:pdf|png|jpe?g|gif|webp|avif|bmp|tiff?|txt|docx?|pptx?|xlsx?|odt|odp|ods)$/i;
 let mainWindow;
 let moodleWindow;
 let moodle;
@@ -87,8 +89,8 @@ function connection(root, live, snapshotFile, storage) {
   }
   browserSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   browserSession.setPermissionCheckHandler(() => false);
-  browserSession.removeListener('will-download', preventDownload);
-  browserSession.on('will-download', preventDownload);
+  browserSession.removeListener('will-download', handleMoodleDownload);
+  browserSession.on('will-download', handleMoodleDownload);
   browserSession.webRequest.onBeforeRequest((details, callback) => {
     const url = target.localUrl(details.url);
     // The sandbox login can race with an optional media request and rotate the session cookie.
@@ -99,8 +101,49 @@ function connection(root, live, snapshotFile, storage) {
   return target;
 }
 
-function preventDownload(event) {
-  event.preventDefault();
+function isSubmissionFile(target, value) {
+  const url = target.localUrl(value);
+  const route = target.route(url);
+  if (!route) return false;
+  const file = route.startsWith('/pluginfile.php/') ? route.slice('/pluginfile.php'.length) :
+    route === '/pluginfile.php' ? url.searchParams.get('file') : null;
+  return /^\/\d+\/assignsubmission_file\/submission_files\/\d+\//.test(file ?? '');
+}
+
+function handleMoodleDownload(event, item, contents) {
+  const target = gradingWindows.get(contents);
+  const urls = item.getURLChain();
+  if (!target || target !== moodle || target.readOnly || !urls.length || !urls.every(url => target.localUrl(url))) {
+    event.preventDefault();
+    return;
+  }
+  if (isSubmissionFile(target, urls[0]) && openableSubmission.test(item.getFilename())) {
+    item.once('done', (_event, state) => {
+      if (state === 'completed') void offerOpenSubmission(item.getSavePath(), contents).catch(console.error);
+    });
+  }
+}
+
+async function offerOpenSubmission(file, contents) {
+  if (!file || !openableSubmission.test(file) || contents.isDestroyed()) return;
+  const window = BrowserWindow.fromWebContents(contents);
+  if (!window) return;
+  const { response } = await dialog.showMessageBox(window, {
+    type: 'info',
+    message: 'Submission downloaded',
+    detail: path.basename(file),
+    buttons: ['Done', 'Open file'],
+    defaultId: 0,
+    cancelId: 0,
+  });
+  if (response === 1) {
+    const error = await shell.openPath(file);
+    if (error && !window.isDestroyed()) await dialog.showMessageBox(window, {
+      type: 'error',
+      message: 'Could not open the downloaded file',
+      detail: error,
+    });
+  }
 }
 
 function visibilityScope(target) {
@@ -133,7 +176,7 @@ function secureWindow(window, allowsNavigation, onBlocked) {
   }
 }
 
-function openMoodle(url, { signingIn = false, prepare = false } = {}) {
+function openMoodle(url, { signingIn = false, prepare = false, grading = false } = {}) {
   const target = moodle;
   if (!signingIn) requireEditing(target);
   if (moodleWindow && !moodleWindow.isDestroyed()) moodleWindow.close();
@@ -165,6 +208,16 @@ function openMoodle(url, { signingIn = false, prepare = false } = {}) {
     reportLoginFailure?.(host ? `Moodle sign-in redirected to ${host}, which this connection does not allow.` :
       'Moodle sign-in attempted an unsupported redirect.');
   });
+  if (grading) {
+    const contents = window.webContents;
+    gradingWindows.set(contents, target);
+    contents.setWindowOpenHandler(({ url: link }) => {
+      if (target === moodle && !target.readOnly && isSubmissionFile(target, link)) {
+        contents.downloadURL(link);
+      }
+      return { action: 'deny' };
+    });
+  }
   window.on('closed', () => {
     if (moodleWindow === window) {
       moodleWindow = null;
@@ -447,7 +500,7 @@ app.whenReady().then(async () => {
       openMoodle(link);
     }
     if (kind === 'assignment' && assignment) openMoodle(url(`/mod/assign/view.php?id=${id}`));
-    if (kind === 'grading' && assignment?.canGrade) openMoodle(url(`/mod/assign/view.php?id=${id}&action=grading`));
+    if (kind === 'grading' && assignment?.canGrade) openMoodle(url(`/mod/assign/view.php?id=${id}&action=grading`), { grading: true });
     if (kind === 'event' && event?.path && route(localUrl(url(event.path))) === '/calendar/view.php') {
       openMoodle(url(event.path));
     }
