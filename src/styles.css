@@ -164,7 +164,20 @@ main { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min
 .assistant-compose textarea { resize: vertical; min-height: 82px; max-height: 220px; line-height: 1.45; }
 #composer-status, #chat-status { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
 #composer-status[data-error="true"], #draft-feedback[data-error="true"], #settings-status[data-error="true"], #theme-status { color: var(--error); }
-.chat-stage { min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto auto; gap: 8px; padding: 12px 15px; border: 1px solid var(--line); border-radius: 13px; background: var(--paper); }
+.chat-stage { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 8px; padding: 12px 15px; border: 1px solid var(--line); border-radius: 13px; background: var(--paper); }
+.chat-skill { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.chat-skill select { border: 1px solid var(--line); border-radius: 6px; padding: 6px; background: var(--paper); }
+#chat-skill-hint { color: var(--muted); }
+.chat-entry.presentation-plan { max-width: 100%; }
+.presentation-slides { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin-top: 12px; }
+.presentation-slide { padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
+.presentation-slide h3 { font-size: 16px; }
+.presentation-slide ul { padding-left: 18px; font-size: 13px; margin-top: 8px; }
+.presentation-slide img { display: block; max-width: 100%; height: 120px; object-fit: contain; margin-top: 10px; }
+.presentation-slide small { display: block; color: var(--muted); font-size: 11px; margin-top: 5px; overflow-wrap: anywhere; }
+.presentation-sources { margin-top: 12px; font-size: 13px; }
+.presentation-sources button { display: block; padding: 4px 0; text-align: left; }
+.presentation-warning { margin-top: 8px; color: var(--muted); font-size: 13px; }
 .chat-log { min-height: 0; overflow: auto; padding: 5px; }
 .chat-empty { padding: 16px 8px; color: var(--muted); }
 .chat-entry { max-width: min(86%, 72ch); margin-bottom: 12px; padding: 10px 13px; border-radius: 9px; background: var(--stage); }

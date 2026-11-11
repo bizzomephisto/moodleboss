@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src https://upload.wikimedia.org; base-uri 'none'; form-action 'none'">
   <title>MoodleBOSS</title>
   <link rel="stylesheet" href="styles.css">
   <script src="renderer.js" defer></script>
@@ -164,10 +164,15 @@
       </section>
       <section id="chat-view" class="work-view chat-view" aria-labelledby="chat-title" hidden>
         <header class="heading chat-heading">
-          <div><h1 id="chat-title">AI chat</h1><p>Brainstorm an assignment, plan a lecture, or get feedback on an idea.</p></div>
+          <div><h1 id="chat-title">AI chat</h1><p>Plan a lesson, research a topic, or build a presentation.</p></div>
           <button type="button" id="clear-chat" class="secondary">New chat</button>
         </header>
         <div class="chat-stage">
+          <div class="chat-skill">
+            <label for="chat-skill">Skill</label>
+            <select id="chat-skill"><option value="chat">Teaching assistant</option><option value="research-slides">Research &amp; Google Slides</option></select>
+            <span id="chat-skill-hint"></span>
+          </div>
           <div id="chat-log" class="chat-log" role="log" aria-live="polite"></div>
           <p id="chat-status" role="status"></p>
           <div class="prompt-bar">
@@ -205,6 +210,18 @@
         <p id="course-visibility-summary" class="composer-hint" role="status">Connect to Moodle to see your courses.</p>
         <div id="course-visibility-list" role="group" aria-labelledby="course-visibility-title"></div>
         <p id="course-visibility-error" role="alert"></p>
+      </section>
+      <section class="moodle-settings" aria-labelledby="google-slides-title">
+        <h3 class="settings-section-title" id="google-slides-title">Google Slides</h3>
+        <p class="composer-hint">Connect Google to create presentations from Chat. The Google connection lasts for this app session.</p>
+        <div class="composer-actions">
+          <button type="button" class="secondary" id="google-import">Import Google credentials</button>
+          <button type="button" class="secondary" id="google-connect" disabled>Connect Google</button>
+          <button type="button" class="secondary" id="google-cancel" hidden>Cancel sign-in</button>
+          <button type="button" class="secondary" id="google-disconnect" hidden>Disconnect</button>
+          <button type="button" class="row-button" id="google-setup">Setup instructions</button>
+        </div>
+        <p id="google-status" class="composer-hint" role="status">Checking Google connection…</p>
       </section>
       <h3 class="settings-section-title">AI settings</h3>
       <p id="ai-summary"></p>

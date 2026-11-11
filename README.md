@@ -60,6 +60,33 @@ Under **Settings → Course visibility**, uncheck courses to hide them from
 the sidebar, dashboard, and assignment builder. MoodleBOSS saves this preference
 on this computer for each Moodle site and account.
 
+## Research and presentations in Chat
+
+Choose **Research & Google Slides** from the Chat skill selector. Describe the
+topic, audience, and slide count, then select **Research & plan**. MoodleBOSS
+uses your selected AI provider to research Wikipedia and choose licensed images
+from Wikimedia Commons. The preview includes the slide outline, research links,
+and image credits. After connecting Google, select **Create in Google Slides**.
+The generated deck includes editable layouts, speaker notes, citations, and
+linked references. Research plans stay in the current chat session.
+
+## Connect Google Slides
+
+1. In your [Google Cloud project](https://console.cloud.google.com/), enable the
+   **Google Slides API** and **Google Drive API**.
+2. Configure Google Auth Platform's consent screen. For an external app in
+   testing, add your Google account as a test user.
+3. Create an OAuth client with the **Desktop app** application type and download
+   its JSON credentials.
+4. In MoodleBOSS **Settings → Google Slides**, select **Import Google credentials**,
+   choose that file, and then select **Connect Google**. Finish sign-in in
+   your browser.
+
+MoodleBOSS requests access to files it creates using the `drive.file` scope.
+The Google connection lasts for the app session. Imported Desktop client
+credentials are stored in the local app profile. Your Google workspace's
+administrator may need to allow the OAuth client.
+
 ## Build the archives
 
 On Linux, install the project dependencies with `npm ci`, then run

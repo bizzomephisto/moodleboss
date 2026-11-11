@@ -12,6 +12,8 @@
   const chatInput = el('chat-input');
   const chatLog = el('chat-log');
   let chatTurns = [];
+  let googleState = { configured: false, connected: false };
+  const chatSkill = el('chat-skill');
   const provider = el('ai-provider');
   const endpoint = el('ai-endpoint');
   const model = el('ai-model');
@@ -28,7 +30,7 @@
   const status = el('composer-status');
   const draftFeedback = el('draft-feedback');
   const reconnect = el('composer-connect');
-  const actions = ['generate-draft', 'save-draft', 'review-draft', 'find-models', 'save-ai', 'clear-key', 'send-chat', 'clear-chat', 'confirm-delete-draft', 'cancel-delete-draft'];
+  const actions = ['generate-draft', 'save-draft', 'review-draft', 'find-models', 'save-ai', 'clear-key', 'send-chat', 'clear-chat', 'confirm-delete-draft', 'cancel-delete-draft', 'google-import', 'google-connect', 'google-disconnect'];
   let initialized = false;
   let working = false;
   let loadingSections = false;
@@ -64,6 +66,9 @@
   function syncControls() {
     for (const id of actions) el(id).disabled = working;
     provider.disabled = working;
+    chatSkill.disabled = working;
+    el('google-connect').disabled = working || !googleState.configured;
+    document.querySelectorAll('.presentation-create, .presentation-images').forEach(control => { control.disabled = working; });
     const destination = section.options.length && valueOf(course) !== null;
     const content = title.value.trim() && instructions.value.trim();
     el('review-draft').disabled = environment.live || working || loadingSections || !destination || !content;
@@ -285,6 +290,7 @@
       applyDraft(result.draft);
       updateDraftList(result.drafts);
       initialized = true;
+      showGoogle(await use(window.workspace.google.status()));
     } catch (error) {
       message(error.message, true);
     }
@@ -311,12 +317,120 @@
   function renderChat(turns = chatTurns) {
     chatLog.replaceChildren(...turns.map(turn => {
       const entry = node('article', 'chat-entry ' + turn.role);
-      entry.append(node('p', 'eyebrow', turn.role === 'user' ? 'You' : 'MoodleBOSS'), node('p', 'chat-text', turn.content));
+      entry.append(node('p', 'eyebrow', turn.role === 'user' ? 'You' : 'MoodleBOSS'));
+      if (turn.presentation) {
+        entry.classList.add('presentation-plan');
+        entry.append(renderPresentation(turn.presentation));
+      } else entry.append(node('p', 'chat-text', turn.content));
       return entry;
     }));
     if (!turns.length) chatLog.append(node('p', 'chat-empty', 'Ask for a studio exercise, lecture outline, or feedback on an idea.'));
     chatLog.scrollTop = chatLog.scrollHeight;
   }
+
+  function showGoogle(state) {
+    googleState = state;
+    el('google-status').textContent = state.connected ? 'Google connected for this app session.' :
+      state.configured ? 'Credentials imported. Connect your Google account.' : 'Import Google Desktop app credentials to connect.';
+    el('google-disconnect').hidden = !state.connected;
+    syncControls();
+  }
+
+  function openPresentationLink(plan, kind, id) {
+    use(window.workspace.presentations.open(plan.id, kind, id)).catch(error => {
+      el('chat-status').textContent = error.message;
+    });
+  }
+
+  function renderPresentation(plan) {
+    const content = node('div');
+    content.append(node('h2', '', plan.title), node('p', 'chat-text', plan.summary));
+    const slides = node('div', 'presentation-slides');
+    for (const slide of plan.slides) {
+      const card = node('article', 'presentation-slide');
+      card.append(node('h3', '', slide.title));
+      const bullets = node('ul');
+      bullets.append(...slide.bullets.map(value => node('li', '', value)));
+      card.append(bullets);
+      const image = plan.images.find(item => item.id === slide.imageId);
+      if (image) {
+        const thumbnail = node('img');
+        thumbnail.src = image.url;
+        thumbnail.alt = image.title;
+        thumbnail.loading = 'lazy';
+        thumbnail.referrerPolicy = 'no-referrer';
+        card.append(thumbnail, node('small', '', `${image.artist || 'Wikimedia Commons'} · ${image.license}`));
+      }
+      slides.append(card);
+    }
+    content.append(slides);
+    for (const warning of plan.warnings) content.append(node('p', 'presentation-warning', warning));
+    const sources = node('details', 'presentation-sources');
+    sources.append(node('summary', '', 'Research sources and image credits'));
+    for (const source of plan.sources) {
+      sources.append(button(source.title, 'row-button', () => openPresentationLink(plan, 'source', source.id)));
+    }
+    for (const image of plan.images.filter(item => plan.slides.some(slide => slide.imageId === item.id))) {
+      sources.append(button(`${image.title} · ${image.license}`, 'row-button', () => openPresentationLink(plan, 'image', image.id)));
+    }
+    content.append(sources);
+    const controls = node('div', 'composer-actions');
+    const include = node('input', 'presentation-images');
+    include.type = 'checkbox';
+    include.checked = plan.includeImages !== false;
+    include.disabled = working;
+    include.addEventListener('change', () => { plan.includeImages = include.checked; });
+    const label = node('label', 'theme-toggle');
+    label.hidden = Boolean(plan.deck);
+    label.append(include, document.createTextNode('Include images'));
+    const create = button(plan.deck ? 'Open in Google Slides' : 'Create in Google Slides', 'primary presentation-create', () => {
+      if (plan.deck) { openPresentationLink(plan, 'deck'); return; }
+      run(async () => {
+        showGoogle(await use(window.workspace.google.status()));
+        if (!googleState.connected) {
+          openSettings();
+          (googleState.configured ? el('google-connect') : el('google-import')).focus();
+          el('chat-status').textContent = 'Connect Google in Settings, then create this presentation.';
+          return;
+        }
+        el('chat-status').textContent = 'Creating Google Slides…';
+        plan.deck = await use(window.workspace.presentations.create(plan.id, include.checked));
+        el('chat-status').textContent = 'Presentation created in your Google Drive.';
+        renderChat();
+      }, el('chat-status'));
+    });
+    create.disabled = working;
+    controls.append(label, create);
+    content.append(controls);
+    return content;
+  }
+
+  function changeChatSkill() {
+    const research = chatSkill.value === 'research-slides';
+    el('chat-skill-hint').textContent = research ? 'Wikipedia research · Wikimedia Commons images' : '';
+    chatInput.placeholder = research ? 'Describe the topic, audience, and presentation you want…' : 'Ask about a teaching idea…';
+    el('send-chat').textContent = research ? 'Research & plan' : 'Send';
+  }
+  chatSkill.addEventListener('change', changeChatSkill);
+  window.workspace.presentations.onProgress(message => {
+    if (working) el('chat-status').textContent = message;
+  });
+  for (const [id, action] of [['google-import', 'importClient'], ['google-connect', 'connect'], ['google-disconnect', 'disconnect']]) {
+    el(id).addEventListener('click', () => run(async () => {
+      el('google-status').textContent = action === 'connect' ? 'Complete Google sign-in in your browser…' : 'Updating Google connection…';
+      el('google-cancel').hidden = action !== 'connect';
+      try {
+        showGoogle(await use(window.workspace.google[action]()));
+      } catch (error) {
+        showGoogle(await use(window.workspace.google.status()));
+        el('google-status').textContent = error.message;
+      } finally {
+        el('google-cancel').hidden = true;
+      }
+    }));
+  }
+  el('google-cancel').addEventListener('click', () => window.workspace.google.cancel());
+  el('google-setup').addEventListener('click', () => window.workspace.google.setup());
 
   el('open-settings').addEventListener('click', openSettings);
   el('builder-model').addEventListener('click', openSettings);
@@ -410,8 +524,16 @@
     renderChat(turns);
     try {
       await saveSettings();
-      const reply = await use(api.chat(turns));
-      chatTurns = [...turns, { role: 'assistant', content: reply }].slice(-60);
+      const history = turns.map(({ role, content }) => ({ role, content }));
+      let answer;
+      if (chatSkill.value === 'research-slides') {
+        const plan = await use(window.workspace.presentations.prepare(history));
+        answer = { role: 'assistant', presentation: plan, content: plan.title + '\n' + plan.summary +
+          '\n' + plan.slides.map(slide => slide.title).join('\n') };
+      } else {
+        answer = { role: 'assistant', content: await use(api.chat(history)) };
+      }
+      chatTurns = [...turns, answer].slice(-60);
       if (chatInput.value.trim() === content) chatInput.value = '';
       chatStatus.textContent = '';
     } catch (error) {
@@ -420,6 +542,7 @@
     renderChat();
   }));
   renderChat();
+  changeChatSkill();
   initialize();
 
   provider.addEventListener('change', () => {

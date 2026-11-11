@@ -20,6 +20,7 @@ jobs:
         with:
           node-version: 24
       - run: npm ci --ignore-scripts
+      - run: npm test
       - run: npm run package -- mac
       - name: Launch the extracted app
         shell: bash

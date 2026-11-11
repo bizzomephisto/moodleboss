@@ -66,12 +66,12 @@ async function listModels(settings, key) {
   return [...ids].sort();
 }
 
-async function complete(settings, key, messages, temperature) {
+async function complete(settings, key, messages, temperature, maxTokens = 2400) {
   const { provider, model } = settings;
   const [system, ...input] = messages;
   if (provider === 'openai') {
     const result = await request(settings, key, '/responses', {
-      model, instructions: system.content, input, max_output_tokens: 2400, store: false,
+      model, instructions: system.content, input, max_output_tokens: maxTokens, store: false,
     });
     return (result.output ?? []).filter(item => item.type === 'message')
       .flatMap(item => item.content ?? []).filter(part => part.type === 'output_text').map(part => part.text).join('');
@@ -83,18 +83,18 @@ async function complete(settings, key, messages, temperature) {
       contents: input.map(turn => ({
         role: turn.role === 'assistant' ? 'model' : 'user', parts: [{ text: turn.content }],
       })),
-      generationConfig: { maxOutputTokens: 4096 },
+      generationConfig: { maxOutputTokens: Math.max(4096, maxTokens) },
     });
     return (result.candidates?.[0]?.content?.parts ?? []).filter(part => !part.thought).map(part => part.text ?? '').join('');
   }
   if (provider === 'claude') {
     const result = await request(settings, key, '/messages', {
-      model, system: system.content, messages: input, max_tokens: 2400,
+      model, system: system.content, messages: input, max_tokens: maxTokens,
     });
     return (result.content ?? []).filter(part => part.type === 'text').map(part => part.text).join('');
   }
   const result = await request(settings, key, '/chat/completions', {
-    model, max_tokens: 2400, messages,
+    model, max_tokens: maxTokens, messages,
     ...(provider !== 'compatible' && temperature !== undefined && { temperature }),
   });
   return result.choices?.[0]?.message?.content;

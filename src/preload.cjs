@@ -10,6 +10,20 @@ contextBridge.exposeInMainWorld('workspace', {
   open: (kind, id) => ipcRenderer.invoke('moodle:open', kind, id),
   onConnected: callback => ipcRenderer.on('moodle:connected', () => callback()),
   onLoginFailed: callback => ipcRenderer.on('moodle:login-failed', (_event, message) => callback(message)),
+  presentations: {
+    prepare: history => ipcRenderer.invoke('presentation:prepare', history),
+    create: (id, includeImages) => ipcRenderer.invoke('presentation:create', id, includeImages),
+    open: (id, kind, sourceId) => ipcRenderer.invoke('presentation:open', id, kind, sourceId),
+    onProgress: callback => ipcRenderer.on('presentation:progress', (_event, message) => callback(message)),
+  },
+  google: {
+    status: () => ipcRenderer.invoke('google:status'),
+    importClient: () => ipcRenderer.invoke('google:import'),
+    connect: () => ipcRenderer.invoke('google:connect'),
+    cancel: () => ipcRenderer.invoke('google:cancel'),
+    disconnect: () => ipcRenderer.invoke('google:disconnect'),
+    setup: () => ipcRenderer.invoke('google:setup'),
+  },
   assignment: {
     settings: id => ipcRenderer.invoke('moodle:assignment-settings', id),
     edit: id => ipcRenderer.invoke('moodle:edit-assignment', id),

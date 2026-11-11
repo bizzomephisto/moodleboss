@@ -1,7 +1,7 @@
 {
   "name": "moodle-instructor",
   "productName": "Moodle Instructor",
-  "version": "0.3.5",
+  "version": "0.4.0",
   "private": true,
   "description": "Moodle instructor workspace with sandbox and read-only live testing",
   "repository": {
@@ -11,6 +11,7 @@
   "main": "src/main.cjs",
   "scripts": {
     "start": "electron .",
+    "test": "node --test",
     "package": "bash scripts/package.sh"
   },
   "dependencies": {

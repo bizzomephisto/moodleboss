@@ -2,6 +2,7 @@ const { readFile, writeFile, rename } = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { complete, endpoints, hosted, listModels } = require('./ai-provider.cjs');
+const { preparePresentation } = require('./presentation.cjs');
 
 const defaults = {
   provider: 'lmstudio', endpoint: 'http://127.0.0.1:1234/v1', model: '',
@@ -238,6 +239,7 @@ async function loadComposer(directory) {
     models: () => listModels(state.settings, activeKey()),
     generate: value => generate(state.settings, activeKey(), draftFrom(value)),
     chat: history => chat(state.settings, activeKey(), history),
+    presentation: (history, progress) => preparePresentation(state.settings, activeKey(), history, progress),
   };
 }
 

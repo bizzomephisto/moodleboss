@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, session, protocol, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, session, protocol, shell, dialog } = require('electron');
 const { createHash } = require('node:crypto');
 const { mkdir, readFile, rename, writeFile } = require('node:fs/promises');
 const path = require('node:path');
@@ -10,6 +10,7 @@ const {
 const { loadComposer, draftFrom } = require('./composer.cjs');
 const { fillAssignment } = require('./assignment-form.cjs');
 const { site: louisianaMoodle, isSignInRedirect, microsoftSignIn } = require('./microsoft-sso.cjs');
+const { loadGoogle } = require('./google-slides.cjs');
 
 app.setName('Moodle Instructor');
 app.enableSandbox();
@@ -303,6 +304,12 @@ app.whenReady().then(async () => {
   const dataDirectory = app.getPath('userData');
   await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
   const composer = await loadComposer(dataDirectory);
+  const google = await loadGoogle(dataDirectory, url => shell.openExternal(url));
+  app.on('will-quit', google.close);
+  const presentations = new Map();
+  const progress = message => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('presentation:progress', message);
+  };
   // Keep the workspace files together for this launch, including after Reload.
   // The temporary workspace session avoids reusing assets cached by an earlier build.
   const workspaceSession = session.fromPartition('instructor-workspace', { cache: false });
@@ -392,6 +399,44 @@ app.whenReady().then(async () => {
   handleComposer('composer:models', composer.models);
   handleComposer('composer:generate', composer.generate);
   handleComposer('composer:chat', composer.chat);
+  handleComposer('presentation:prepare', async history => {
+    const plan = await composer.presentation(history, progress);
+    if (presentations.size >= 12) presentations.delete(presentations.keys().next().value);
+    presentations.set(plan.id, plan);
+    return plan;
+  });
+  handleComposer('presentation:create', async (id, includeImages) => {
+    const plan = presentations.get(id);
+    if (!plan || typeof includeImages !== 'boolean') throw new Error('Research a presentation in Chat first.');
+    const deck = await google.create(plan, includeImages, progress);
+    plan.deck = deck;
+    return deck;
+  });
+  handleComposer('presentation:open', (id, kind, sourceId) => {
+    const plan = presentations.get(id);
+    if (!plan) throw new Error('This presentation plan is no longer available in this app session.');
+    const url = kind === 'deck' ? plan.deck?.url : kind === 'image' ?
+      plan.images.find(image => image.id === sourceId)?.pageUrl :
+      plan.sources.find(source => source.id === sourceId)?.url;
+    if (!url) throw new Error('This presentation link is unavailable.');
+    return shell.openExternal(url);
+  });
+  handleComposer('google:status', google.status);
+  handleComposer('google:import', async () => {
+    const selected = await dialog.showOpenDialog(mainWindow, { title: 'Import Google Desktop app credentials',
+      properties: ['openFile'], filters: [{ name: 'Google OAuth credentials', extensions: ['json'] }] });
+    if (selected.canceled) return google.status();
+    const value = await readFile(selected.filePaths[0], 'utf8');
+    if (value.length > 20000) throw new Error('Choose a Google OAuth Desktop credentials JSON file.');
+    try { return await google.importClient(JSON.parse(value)); } catch (error) {
+      if (error instanceof SyntaxError) throw new Error('The credentials file does not contain valid JSON.');
+      throw error;
+    }
+  });
+  handleComposer('google:connect', google.connect);
+  handleComposer('google:cancel', google.close);
+  handleComposer('google:disconnect', google.disconnect);
+  handle('google:setup', () => shell.openExternal(repository.url + '#connect-google-slides'));
   handleComposer('composer:sections', sectionsFor);
   handleComposer('composer:review', reviewAssignment);
   handleComposer('moodle:assignment-settings', async id =>
