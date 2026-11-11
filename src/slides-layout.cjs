@@ -1,5 +1,12 @@
 const color = hex => ({ red: parseInt(hex.slice(0, 2), 16) / 255,
   green: parseInt(hex.slice(2, 4), 16) / 255, blue: parseInt(hex.slice(4, 6), 16) / 255 });
+const themes = new Map([
+  ['studio', { paper: 'F6F1E8', ink: '302823', dark: '342A26', accent: 'A74B32', panel: 'E9DED1', light: 'F2B79B', display: 'Georgia' }],
+  ['blueprint', { paper: 'EFF4F8', ink: '192E42', dark: '172B40', accent: '285C96', panel: 'DCE8F3', light: 'A9D3FC', display: 'Arial' }],
+  ['fieldwork', { paper: 'F2F2E8', ink: '29372C', dark: '25382E', accent: '46684D', panel: 'DFE8D9', light: 'C2DBAA', display: 'Georgia' }],
+]);
+const imageIds = slide => slide.imageIds ?? (slide.imageId ? [slide.imageId] : []);
+const slideImages = (plan, slide) => imageIds(slide).map(id => plan.images.find(image => image.id === id)).filter(Boolean);
 
 function fitFont(paragraphs, width, height, maximum, minimum) {
   for (let size = maximum; size >= minimum; size -= 2) {
@@ -14,7 +21,7 @@ function deckPages(plan) {
   const pages = plan.slides.map(slide => ({ ...slide }));
   const credits = [
     ...plan.sources.map((source, index) => ({ label: `[${index + 1}] ${source.title}`, url: source.url })),
-    ...plan.images.filter(image => pages.some(slide => slide.imageId === image.id)).map(image =>
+    ...plan.images.filter(image => pages.some(slide => imageIds(slide).includes(image.id))).map(image =>
       ({ label: `${image.title.slice(0, 110)} — ${(image.artist || 'See source for artist').slice(0, 100)}, ${image.license}`,
         url: image.pageUrl })),
   ];
@@ -31,17 +38,31 @@ function buildSlideRequests(plan, width, height, includeImages) {
   const pages = deckPages(plan);
   const requests = [];
   const scale = Math.min(width / 960, height / 540);
+  const theme = themes.get(plan.theme) ?? themes.get('studio');
   const sourceNumbers = new Map(plan.sources.map((source, index) => [source.id, index + 1]));
-  function box(pageId, name, value, x, y, w, h, size, ink, bold = false) {
+  const position = (pageId, x, y, w, h) => ({
+    pageObjectId: pageId,
+    size: { width: { magnitude: w * scale, unit: 'PT' }, height: { magnitude: h * scale, unit: 'PT' } },
+    transform: { scaleX: 1, scaleY: 1, translateX: x * scale, translateY: y * scale, unit: 'PT' },
+  });
+  function panel(pageId, name, x, y, w, h, fill) {
+    const objectId = pageId + '_' + name;
+    requests.push(
+      { createShape: { objectId, shapeType: 'RECTANGLE', elementProperties: position(pageId, x, y, w, h) } },
+      { updateShapeProperties: { objectId, shapeProperties: {
+        shapeBackgroundFill: { solidFill: { color: { rgbColor: color(fill) }, alpha: 1 } },
+        outline: { propertyState: 'NOT_RENDERED' },
+      }, fields: 'shapeBackgroundFill,outline' } },
+    );
+  }
+  function box(pageId, name, value, x, y, w, h, size, ink, bold = false, fontFamily = 'Arial') {
     if (!value) return;
     const id = pageId + '_' + name;
     requests.push(
-      { createShape: { objectId: id, shapeType: 'TEXT_BOX', elementProperties: { pageObjectId: pageId,
-        size: { width: { magnitude: w * scale, unit: 'PT' }, height: { magnitude: h * scale, unit: 'PT' } },
-        transform: { scaleX: 1, scaleY: 1, translateX: x * scale, translateY: y * scale, unit: 'PT' } } } },
+      { createShape: { objectId: id, shapeType: 'TEXT_BOX', elementProperties: position(pageId, x, y, w, h) } },
       { insertText: { objectId: id, text: value, insertionIndex: 0 } },
       { updateTextStyle: { objectId: id, textRange: { type: 'ALL' },
-        style: { fontFamily: 'Arial', fontSize: { magnitude: size * scale, unit: 'PT' }, bold,
+        style: { fontFamily, fontSize: { magnitude: size * scale, unit: 'PT' }, bold,
           foregroundColor: { opaqueColor: { rgbColor: color(ink) } } },
         fields: 'fontFamily,fontSize,bold,foregroundColor' } },
       { updateParagraphStyle: { objectId: id, textRange: { type: 'ALL' },
@@ -49,16 +70,40 @@ function buildSlideRequests(plan, width, height, includeImages) {
         fields: 'spaceAbove,spaceBelow' } },
     );
   }
+  function media(pageId, images, x, y, width, height, columns) {
+    const gap = 12;
+    const rows = Math.ceil(images.length / columns);
+    const cellWidth = (width - (columns - 1) * gap) / columns;
+    const cellHeight = (height - (rows - 1) * gap) / rows;
+    images.forEach((image, index) => {
+      const left = x + (index % columns) * (cellWidth + gap);
+      const top = y + Math.floor(index / columns) * (cellHeight + gap);
+      panel(pageId, 'mat_' + index, left, top, cellWidth, cellHeight, theme.panel);
+      const fit = Math.min((cellWidth - 12) / image.width, (cellHeight - 12) / image.height);
+      const w = image.width * fit;
+      const h = image.height * fit;
+      requests.push({ createImage: { objectId: pageId + '_image_' + index, url: image.url,
+        elementProperties: position(pageId, left + (cellWidth - w) / 2, top + (cellHeight - h) / 2, w, h) } });
+    });
+  }
   pages.forEach((slide, index) => {
     const pageId = 'mb_slide_' + index;
     const cover = index === 0;
-    const image = includeImages && plan.images.find(item => item.id === slide.imageId);
-    const ink = cover ? 'F6F5EF' : '203C3F';
+    const images = includeImages ? slideImages(plan, slide) : [];
+    const gallery = images.length > 1 && slide.layout !== 'feature';
+    const statement = !images.length && (cover || slide.layout === 'statement');
+    const dark = cover || statement;
+    const ink = dark ? theme.paper : theme.ink;
+    const accent = dark ? theme.light : theme.accent;
     requests.push({ createSlide: { objectId: pageId, slideLayoutReference: { predefinedLayout: 'BLANK' } } },
       { updatePageProperties: { objectId: pageId, pageProperties: {
-        pageBackgroundFill: { solidFill: { color: { rgbColor: color(cover ? '203C3F' : 'F6F5EF') }, alpha: 1 } },
+        pageBackgroundFill: { solidFill: { color: { rgbColor: color(dark ? theme.dark : theme.paper) }, alpha: 1 } },
       }, fields: 'pageBackgroundFill' } });
-    box(pageId, 'title', slide.title, 55, 45, 850, 110, fitFont([slide.title], 850, 110, cover ? 43 : 36, 27), ink, true);
+    panel(pageId, 'rule', 54, 34, 54, 5, accent);
+    const titleWidth = cover && images.length && !gallery ? 420 : 850;
+    const titleHeight = titleWidth === 420 ? 172 : 112;
+    box(pageId, 'title', slide.title, 48, 50, titleWidth, titleHeight,
+      fitFont([slide.title], titleWidth, titleHeight, cover ? 54 : 42, 24), ink, true, theme.display);
     if (slide.references) {
       slide.links.forEach((link, linkIndex) => {
         const name = 'reference_' + linkIndex;
@@ -67,26 +112,37 @@ function buildSlideRequests(plan, width, height, includeImages) {
         requests.push({ updateTextStyle: { objectId: pageId + '_' + name, textRange: { type: 'ALL' },
           style: { link: { url: link.url } }, fields: 'link' } });
       });
+    } else if (gallery) {
+      media(pageId, images, 54, 158, 852, slide.bullets.length ? 182 : 310, images.length);
+      const columnWidth = 852 / Math.max(1, slide.bullets.length);
+      slide.bullets.forEach((bullet, i) => {
+        const left = 54 + i * columnWidth;
+        panel(pageId, 'caption_rule_' + i, left, 356, 27, 3, accent);
+        box(pageId, 'caption_' + i, bullet, left - 6, 365, columnWidth - 12, 116,
+          fitFont([bullet], columnWidth - 12, 116, 21, 14), ink);
+      });
+    } else if (images.length) {
+      const top = cover ? 221 : 170;
+      box(pageId, 'body', slide.bullets.join('\n'), 48, top, 416, 477 - top,
+        fitFont(slide.bullets, 416, 477 - top, 28, 16), ink);
+      media(pageId, images, 496, cover ? 60 : 160, 410, cover ? 412 : 312, images.length > 2 ? 2 : 1);
+    } else if (statement) {
+      box(pageId, 'body', slide.bullets.join('\n'), 48, 181, 785, 290,
+        fitFont(slide.bullets, 785, 290, 33, 19), ink, false, theme.display);
     } else {
-      const bodyWidth = image ? 455 : 845;
-      box(pageId, 'body', slide.bullets.join('\n'), 55, 165, bodyWidth, 285,
-        fitFont(slide.bullets, bodyWidth, 285, 26, 16), ink);
-    }
-    if (image) {
-      const fit = Math.min(345 / image.width, 270 / image.height);
-      const w = image.width * fit;
-      const h = image.height * fit;
-      requests.push({ createImage: { objectId: pageId + '_image', url: image.url,
-        elementProperties: { pageObjectId: pageId,
-          size: { width: { magnitude: w * scale, unit: 'PT' }, height: { magnitude: h * scale, unit: 'PT' } },
-          transform: { scaleX: 1, scaleY: 1, translateX: (555 + (345 - w) / 2) * scale,
-            translateY: (165 + (270 - h) / 2) * scale, unit: 'PT' } } } });
-      box(pageId, 'credit', `${(image.artist || 'See source for creator').slice(0, 45)} · ${image.license}`,
-        550, 445, 350, 38, 11, cover ? 'CDDAD7' : '536766');
+      const rowHeight = 288 / Math.max(1, slide.bullets.length);
+      slide.bullets.forEach((bullet, i) => {
+        const top = 163 + i * rowHeight;
+        panel(pageId, 'point_' + i, 54, top, 852, rowHeight - 9, theme.panel);
+        panel(pageId, 'point_rule_' + i, 54, top, 4, rowHeight - 9, accent);
+        box(pageId, 'body_' + i, bullet, 70, top + 9, 814, rowHeight - 18,
+          fitFont([bullet], 814, rowHeight - 18, 28, 15), ink);
+      });
     }
     const citations = slide.sourceIds.map(id => '[' + sourceNumbers.get(id) + ']').join(' ');
+    panel(pageId, 'footer_rule', 54, 486, 852, 1, accent);
     box(pageId, 'footer', `${citations}${citations ? '   ·   ' : ''}${index + 1} / ${pages.length}`,
-      55, 492, 850, 25, 12, cover ? 'CDDAD7' : '536766');
+      48, 495, 850, 25, 11, accent);
   });
   return requests;
 }
@@ -100,9 +156,9 @@ function noteRequests(plan, presentation) {
     if (!id) return [];
     const sources = plan.sources.filter(source => slide.sourceIds.includes(source.id))
       .map(source => source.title + '\n' + source.url);
-    const image = plan.images.find(item => item.id === slide.imageId);
-    const credit = image ? `Image: ${image.title}\n${image.artist}\n${image.license}\n${image.pageUrl}\n${image.licenseUrl}` : '';
-    const value = [slide.notes, ...sources, credit].filter(Boolean).join('\n\n');
+    const credits = slideImages(plan, slide).map(image =>
+      `Image: ${image.title}\n${image.artist}\n${image.license}\n${image.pageUrl}\n${image.licenseUrl}`);
+    const value = [slide.notes, ...sources, ...credits].filter(Boolean).join('\n\n');
     const shape = notesPage.pageElements?.find(element => element.objectId === id)?.shape;
     const existing = (shape?.text?.textElements ?? []).map(element => element.textRun?.content ?? '').join('').replace(/\n$/, '');
     if (!value || existing === value) return [];

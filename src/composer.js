@@ -350,21 +350,28 @@
     const content = node('div');
     content.append(node('h2', '', plan.title), node('p', 'chat-text', plan.summary));
     const slides = node('div', 'presentation-slides');
+    slides.dataset.deckTheme = plan.theme ?? 'studio';
+    const imageIds = slide => slide.imageIds ?? (slide.imageId ? [slide.imageId] : []);
     for (const slide of plan.slides) {
       const card = node('article', 'presentation-slide');
       card.append(node('h3', '', slide.title));
       const bullets = node('ul');
       bullets.append(...slide.bullets.map(value => node('li', '', value)));
       card.append(bullets);
-      const image = plan.images.find(item => item.id === slide.imageId);
-      if (image) {
+      const gallery = node('div', 'presentation-thumbnails');
+      for (const id of imageIds(slide)) {
+        const image = plan.images.find(item => item.id === id);
+        if (!image) continue;
+        const figure = node('div');
         const thumbnail = node('img');
         thumbnail.src = image.url;
         thumbnail.alt = image.title;
         thumbnail.loading = 'lazy';
         thumbnail.referrerPolicy = 'no-referrer';
-        card.append(thumbnail, node('small', '', `${image.artist || 'See source for creator'} · ${image.license}`));
+        figure.append(thumbnail, node('small', '', `${image.artist || 'See source for creator'} · ${image.license}`));
+        gallery.append(figure);
       }
+      if (gallery.childElementCount) card.append(gallery);
       slides.append(card);
     }
     content.append(slides);
@@ -374,7 +381,7 @@
     for (const source of plan.sources) {
       sources.append(button(source.title, 'row-button', () => openPresentationLink(plan, 'source', source.id)));
     }
-    for (const image of plan.images.filter(item => plan.slides.some(slide => slide.imageId === item.id))) {
+    for (const image of plan.images.filter(item => plan.slides.some(slide => imageIds(slide).includes(item.id)))) {
       sources.append(button(`${image.title} · ${image.license}`, 'row-button', () => openPresentationLink(plan, 'image', image.id)));
     }
     content.append(sources);

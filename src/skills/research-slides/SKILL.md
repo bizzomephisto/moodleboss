@@ -16,8 +16,9 @@ Plan a coherent teaching sequence with concrete examples and an opportunity for
 students to apply the material. Keep slide text concise. Put teaching detail in
 speaker notes. Honor the instructor's requested style and audience.
 
-Choose images for their teaching value. Use only supplied image IDs. Leave
-imageId null when an image adds no value. The app carries the verified source,
+Choose images for their teaching value. Use only supplied image IDs. Group
+images to compare examples or show a sequence. Leave imageIds empty when no
+image adds value. The app carries the verified source,
 artist, and available rights information into image credits.
 
 Return the JSON object required by the caller, without Markdown fences. Source

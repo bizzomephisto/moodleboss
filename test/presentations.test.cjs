@@ -27,8 +27,9 @@ test('research, images with different rights, OAuth return, and retrying a deck 
     if (url.hostname === 'model.test') {
       modelCalls++;
       const plan = modelCalls === 1 ? { queries: ['Ergonomics'], imageQueries: ['Chair'], slideCount: 3 } :
-        { title: 'Ergonomics lesson', summary: 'A lesson using researched examples.', slides: [
-          { title: 'Ergonomics', bullets: ['Design for a comfortable grip'], notes: 'Discuss grip.', sourceIds: ['source_1'], imageId: 'image_en_11' },
+        { title: 'Ergonomics lesson', summary: 'A lesson using researched examples.', theme: 'blueprint', slides: [
+          { title: 'Ergonomics', bullets: ['Design for a comfortable grip'], notes: 'Discuss grip.', sourceIds: ['source_1'],
+            layout: 'gallery', imageIds: ['image_en_11', 'image_10', 'image_en_11', 'unknown'] },
           { title: 'Observe the user', bullets: ['Study posture'], notes: 'Observe an everyday task.', sourceIds: ['source_1'], imageId: 'image_web_0' },
           { title: 'Try it', bullets: ['Sketch a comfortable handle'], notes: 'Ask students to explain their choices.', sourceIds: ['source_1'], imageId: null },
         ] };
@@ -118,6 +119,8 @@ test('research, images with different rights, OAuth return, and retrying a deck 
     assert.equal(plan.images[1].artist, 'Fixture Artist');
     assert.equal(plan.images[2].license, 'All rights reserved');
     assert.equal(plan.slides.length, 3);
+    assert.deepEqual(plan.slides[0].imageIds, ['image_en_11', 'image_10']);
+    assert.deepEqual(plan.slides[1].imageIds, ['image_web_0']);
     google = await loadGoogle(directory, async value => {
       const auth = new URL(value);
       verifierChallenge = auth.searchParams.get('code_challenge');
@@ -143,7 +146,9 @@ test('research, images with different rights, OAuth return, and retrying a deck 
     assert.equal(deck.url, 'https://docs.google.com/presentation/d/fixtureDeck/edit');
     assert.equal(fileCreates, 1);
     const images = batches.flat().filter(request => request.createImage);
-    assert.deepEqual(images.map(request => request.createImage.url), [plan.images[2].url, plan.images[0].url]);
+    assert.deepEqual(images.map(request => request.createImage.url), [plan.images[2].url, plan.images[1].url, plan.images[0].url]);
+    assert.equal(images.filter(request => request.createImage.elementProperties.pageObjectId === 'mb_slide_0').length, 2);
+    assert.match(slides[0].slideProperties.notesPage.pageElements[0].shape.text.textElements[0].textRun.content, /Chair.jpg/);
     assert.ok(batches.flat().some(request => request.deleteObject?.objectId === 'google_starter'));
     assert.ok(batches.flat().some(request => request.updateTextStyle?.style.link?.url === plan.images[0].pageUrl));
     assert.ok(batches.flat().some(request => request.updateTextStyle?.style.link?.url === plan.sources[0].url));
