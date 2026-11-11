@@ -213,7 +213,7 @@
       </section>
       <section class="moodle-settings" aria-labelledby="google-slides-title">
         <h3 class="settings-section-title" id="google-slides-title">Google Slides</h3>
-        <p class="composer-hint">Connect Google to create presentations from Chat. The Google connection lasts for this app session.</p>
+        <p class="composer-hint">Connect Google to create presentations from Chat. Use Disconnect to forget this account on this device.</p>
         <div class="composer-actions">
           <button type="button" class="secondary" id="google-import">Import Google credentials</button>
           <button type="button" class="secondary" id="google-connect" disabled>Connect Google</button>
@@ -246,7 +246,8 @@
           <button type="button" class="secondary" id="save-ai">Save AI settings</button>
           <button type="button" class="secondary" id="clear-key" hidden>Forget key</button>
         </div>
-        <p class="composer-hint">The key stays in this app session. The builder sends your assignment prompt and title. Chat sends recent messages in this session.</p>
+        <p class="composer-hint">The builder sends your assignment prompt and title to the AI provider. Chat sends recent messages.</p>
+        <p id="credential-storage-status" class="composer-hint" hidden>Secure storage is unavailable. AI keys and Google sign-in last until you quit MoodleBOSS.</p>
       <p id="settings-status" role="status"></p>
     </div>
   </dialog>

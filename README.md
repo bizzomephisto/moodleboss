@@ -84,9 +84,12 @@ linked references. Research plans stay in the current chat session.
    your browser.
 
 MoodleBOSS requests access to files it creates using the `drive.file` scope.
-The Google connection lasts for the app session. Imported Desktop client
-credentials are stored in the local app profile. Your Google workspace's
-administrator may need to allow the OAuth client.
+MoodleBOSS saves AI keys and Google sign-in in encrypted local storage when
+your operating system provides a keyring. **Forget key** and **Disconnect**
+remove the saved credentials for the selected AI provider or Google account.
+Without an available keyring, credentials last for the app session. Google
+may ask you to reconnect when authorization expires or is revoked.
+Imported Desktop client credentials are stored in the local app profile.
 
 ## Build the archives
 

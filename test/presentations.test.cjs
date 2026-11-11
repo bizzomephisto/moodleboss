@@ -17,6 +17,9 @@ test('research, images with different rights, OAuth return, and retrying a deck 
   let slides = [];
   const batches = [];
   const authCalls = [];
+  const saved = new Map();
+  const storage = { available: true, read: async name => saved.get(name),
+    write: async (name, value) => saved.set(name, value), remove: async name => saved.delete(name) };
   let verifierChallenge;
   global.fetch = async (value, options = {}) => {
     const url = new URL(value);
@@ -49,6 +52,10 @@ test('research, images with different rights, OAuth return, and retrying a deck 
     }
     if (url.href === 'https://oauth2.googleapis.com/token') {
       authCalls.push(options.body);
+      if (options.body.get('grant_type') === 'refresh_token') {
+        assert.equal(options.body.get('refresh_token'), 'test-refresh');
+        return Response.json({ access_token: 'test-access', expires_in: 3600 });
+      }
       const challenge = createHash('sha256').update(options.body.get('code_verifier')).digest('base64url');
       assert.equal(challenge, verifierChallenge);
       return Response.json({ access_token: 'test-access', refresh_token: 'test-refresh', expires_in: 3600,
@@ -96,11 +103,14 @@ test('research, images with different rights, OAuth return, and retrying a deck 
       assert.equal((await originalFetch(callback)).status, 400);
       callback.search = new URLSearchParams({ state: auth.searchParams.get('state'), code: 'fixture' });
       assert.equal((await originalFetch(callback)).status, 200);
-    });
+    }, storage);
     await google.importClient({ installed: { client_id: 'test.apps.googleusercontent.com', client_secret: 'fixture' } });
     await google.connect();
     assert.equal(authCalls.length, 1);
+    google = await loadGoogle(directory, async () => assert.fail('Restart should not open a browser'), storage);
+    assert.equal(google.status().remembered, true);
     await assert.rejects(google.create(plan, true), /Could not reach Google/);
+    assert.equal(authCalls.length, 2);
     const deck = await google.create(plan, true);
     assert.equal(deck.url, 'https://docs.google.com/presentation/d/fixtureDeck/edit');
     assert.equal(fileCreates, 1);
@@ -114,6 +124,7 @@ test('research, images with different rights, OAuth return, and retrying a deck 
     assert.equal(fileCreates, 1);
     assert.equal(slides.length, pageCount);
     await google.disconnect();
+    google = await loadGoogle(directory, async () => {}, storage);
     await assert.rejects(google.create(plan, true), /Connect Google/);
   } finally {
     google?.close();

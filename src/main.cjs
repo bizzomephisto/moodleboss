@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, session, protocol, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, session, protocol, shell, dialog, safeStorage } = require('electron');
 const { createHash } = require('node:crypto');
 const { mkdir, readFile, rename, writeFile } = require('node:fs/promises');
 const path = require('node:path');
@@ -11,6 +11,7 @@ const { loadComposer, draftFrom } = require('./composer.cjs');
 const { fillAssignment } = require('./assignment-form.cjs');
 const { site: louisianaMoodle, isSignInRedirect, microsoftSignIn } = require('./microsoft-sso.cjs');
 const { loadGoogle } = require('./google-slides.cjs');
+const { secureStorage } = require('./secure-storage.cjs');
 
 app.setName('Moodle Instructor');
 app.enableSandbox();
@@ -303,8 +304,9 @@ app.whenReady().then(async () => {
   if (!ownsProfile) return;
   const dataDirectory = app.getPath('userData');
   await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
-  const composer = await loadComposer(dataDirectory);
-  const google = await loadGoogle(dataDirectory, url => shell.openExternal(url));
+  const storage = await secureStorage(dataDirectory, safeStorage);
+  const composer = await loadComposer(dataDirectory, storage);
+  const google = await loadGoogle(dataDirectory, url => shell.openExternal(url), storage);
   app.on('will-quit', google.close);
   const presentations = new Map();
   const progress = message => {

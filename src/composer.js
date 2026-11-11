@@ -13,6 +13,7 @@
   const chatLog = el('chat-log');
   let chatTurns = [];
   let googleState = { configured: false, connected: false };
+  let secureCredentials = false;
   const chatSkill = el('chat-skill');
   const provider = el('ai-provider');
   const endpoint = el('ai-endpoint');
@@ -111,7 +112,7 @@
     el('ai-summary').textContent = selected;
     el('builder-model').textContent = model.value ? `Model · ${model.value}` : 'Choose an AI model';
     el('clear-key').hidden = !hasKey;
-    key.placeholder = hasKey ? 'Key held for this session' :
+    key.placeholder = hasKey ? (secureCredentials ? 'Key saved on this device' : 'Key held for this session') :
       fixedProviders.includes(provider.value) ? 'Enter your provider API key' : 'Optional for most local servers';
   }
 
@@ -285,6 +286,8 @@
       darkMode.disabled = false;
       profiles = result.profiles;
       fixedProviders = result.fixedProviders;
+      secureCredentials = result.secureStorage;
+      el('credential-storage-status').hidden = secureCredentials;
       provider.value = result.settings.provider;
       showProvider(profiles[provider.value]);
       applyDraft(result.draft);
@@ -330,7 +333,8 @@
 
   function showGoogle(state) {
     googleState = state;
-    el('google-status').textContent = state.connected ? 'Google connected for this app session.' :
+    el('google-status').textContent = state.connected ?
+      (state.remembered ? 'Google connected. MoodleBOSS will remember this account.' : 'Google connected for this app session.') :
       state.configured ? 'Credentials imported. Connect your Google account.' : 'Import Google Desktop app credentials to connect.';
     el('google-disconnect').hidden = !state.connected;
     syncControls();
@@ -394,7 +398,12 @@
           return;
         }
         el('chat-status').textContent = 'Creating Google Slides…';
-        plan.deck = await use(window.workspace.presentations.create(plan.id, include.checked));
+        try {
+          plan.deck = await use(window.workspace.presentations.create(plan.id, include.checked));
+        } catch (error) {
+          showGoogle(await use(window.workspace.google.status()));
+          throw error;
+        }
         el('chat-status').textContent = 'Presentation created in your Google Drive.';
         renderChat();
       }, el('chat-status'));

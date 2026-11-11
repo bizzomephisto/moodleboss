@@ -129,7 +129,7 @@ function draftSelection(state) {
   };
 }
 
-async function loadComposer(directory) {
+async function loadComposer(directory, storage) {
   const file = path.join(directory, 'composer.json');
   let state = { settings: defaults, profiles: {}, drafts: [], activeDraftId: null, theme: 'light', hiddenCourses: {} };
   try {
@@ -150,6 +150,10 @@ async function loadComposer(directory) {
     // Use defaults for a new or unreadable profile.
   }
   const credentials = new Map();
+  for (const provider of Object.keys(endpoints)) {
+    const saved = await storage?.read('ai-' + provider).catch(() => null);
+    if (typeof saved?.endpoint === 'string' && typeof saved.key === 'string') credentials.set(provider, saved);
+  }
   let writes = Promise.resolve();
 
   function activeKey(settings = state.settings) {
@@ -163,12 +167,13 @@ async function loadComposer(directory) {
       const settings = settingsFrom({ endpoint, ...state.profiles[provider], provider });
       profiles[provider] = { ...settings, hasKey: Boolean(activeKey(settings)) };
     }
-    return { settings: state.settings, profiles, hasKey: Boolean(activeKey()), fixedProviders: Object.keys(hosted) };
+    return { settings: state.settings, profiles, hasKey: Boolean(activeKey()), fixedProviders: Object.keys(hosted),
+      secureStorage: Boolean(storage?.available) };
   }
 
   function persist(changes) {
     const write = writes.then(async () => {
-      const next = { ...state, ...(typeof changes === 'function' ? changes(state) : changes) };
+      const next = { ...state, ...(typeof changes === 'function' ? await changes(state) : changes) };
       await writeFile(file + '.tmp', JSON.stringify(next), { mode: 0o600 });
       await rename(file + '.tmp', file);
       state = next;
@@ -231,9 +236,18 @@ async function loadComposer(directory) {
       const settings = settingsFrom(value);
       const suppliedKey = clean(value.key, 4096).trim();
       if (/\s/.test(suppliedKey)) throw new Error('An API key cannot contain spaces or line breaks.');
-      await persist(current => ({ settings, profiles: { ...current.profiles, [settings.provider]: settings } }));
-      if (value.clearKey) credentials.delete(settings.provider);
-      else if (suppliedKey) credentials.set(settings.provider, { endpoint: settings.endpoint, key: suppliedKey });
+      await persist(async current => {
+        const name = 'ai-' + settings.provider;
+        if (value.clearKey) {
+          await storage?.remove(name);
+          credentials.delete(settings.provider);
+        } else if (suppliedKey) {
+          const credential = { endpoint: settings.endpoint, key: suppliedKey };
+          if (storage?.available) await storage.write(name, credential);
+          credentials.set(settings.provider, credential);
+        }
+        return { settings, profiles: { ...current.profiles, [settings.provider]: settings } };
+      });
       return providerSelection();
     },
     models: () => listModels(state.settings, activeKey()),

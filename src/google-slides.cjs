@@ -17,7 +17,9 @@ async function googleResponse(url, options) {
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = result.error?.message ?? result.error_description;
-    throw new Error(detail ? `Google: ${String(detail).slice(0, 350)}` : `Google returned HTTP ${response.status}.`);
+    const error = new Error(detail ? `Google: ${String(detail).slice(0, 350)}` : `Google returned HTTP ${response.status}.`);
+    if (typeof result.error === 'string') error.googleCode = result.error;
+    throw error;
   }
   return result;
 }
@@ -31,14 +33,19 @@ function desktopClient(value) {
   return { client_id: client.client_id, client_secret: client.client_secret };
 }
 
-async function loadGoogle(directory, openBrowser) {
+async function loadGoogle(directory, openBrowser, storage) {
   const file = path.join(directory, 'google-client.json');
   let client;
   try { client = desktopClient(JSON.parse(await readFile(file, 'utf8'))); } catch { /* Await imported credentials. */ }
   let tokens;
+  const saved = await storage?.read('google-session').catch(() => null);
+  if (client && saved?.clientId === client.client_id && typeof saved.refreshToken === 'string' && saved.refreshToken) {
+    tokens = { refresh_token: saved.refreshToken, expires: 0 };
+  }
   let busy = false;
   let cancelSignIn;
-  const status = () => ({ configured: Boolean(client), connected: Boolean(tokens) });
+  const status = () => ({ configured: Boolean(client), connected: Boolean(tokens),
+    remembered: Boolean(storage?.available && tokens?.refresh_token) });
 
   async function exclusive(action) {
     if (busy) throw new Error('Wait for the current Google operation to finish.');
@@ -53,14 +60,27 @@ async function loadGoogle(directory, openBrowser) {
     if (result.scope && !result.scope.split(' ').includes(scope)) {
       throw new Error('Google Slides access was not granted. Connect again and grant access to files created by MoodleBOSS.');
     }
-    tokens = { ...tokens, ...result, expires: Date.now() + (result.expires_in ?? 3600) * 1000 };
+    const refreshing = parameters.grant_type === 'refresh_token';
+    const next = { ...(refreshing ? tokens : {}), ...result, expires: Date.now() + (result.expires_in ?? 3600) * 1000 };
+    if (storage?.available && (!refreshing || next.refresh_token !== tokens?.refresh_token)) {
+      if (next.refresh_token) await storage.write('google-session', { clientId: client.client_id, refreshToken: next.refresh_token });
+      else await storage.remove('google-session');
+    }
+    tokens = next;
   }
 
   async function request(url, method = 'GET', body) {
     if (!tokens) throw new Error('Connect Google in Settings before creating a presentation.');
     if (tokens.expires < Date.now() + 60000) {
       if (!tokens.refresh_token) throw new Error('Your Google session expired. Connect again in Settings.');
-      await exchange({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token });
+      try {
+        await exchange({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token });
+      } catch (error) {
+        if (error.googleCode !== 'invalid_grant') throw error;
+        await storage?.remove('google-session');
+        tokens = undefined;
+        throw new Error('Google authorization expired or was revoked. Connect Google again in Settings.');
+      }
     }
     return googleResponse(url, { method,
       headers: { Authorization: 'Bearer ' + tokens.access_token, ...(body && { 'Content-Type': 'application/json' }) },
@@ -71,10 +91,13 @@ async function loadGoogle(directory, openBrowser) {
     status,
     importClient: value => exclusive(async () => {
       const next = desktopClient(value);
+      const sameClient = next.client_id === client?.client_id && next.client_secret === client?.client_secret;
+      if (sameClient) return status();
+      await storage?.remove('google-session');
+      tokens = undefined;
       await writeFile(file + '.tmp', JSON.stringify({ installed: next }), { mode: 0o600 });
       await rename(file + '.tmp', file);
       client = next;
-      tokens = undefined;
       return status();
     }),
     connect: () => exclusive(async () => {
@@ -117,7 +140,7 @@ async function loadGoogle(directory, openBrowser) {
         const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
         url.search = new URLSearchParams({ client_id: client.client_id, redirect_uri: redirectUri,
           response_type: 'code', scope, state, code_challenge: challenge, code_challenge_method: 'S256',
-          access_type: 'offline', prompt: 'consent' });
+          access_type: 'offline', prompt: 'consent select_account' });
         await openBrowser(url.href);
         const code = await authorization;
         await exchange({ grant_type: 'authorization_code', code, redirect_uri: redirectUri, code_verifier: verifier });
@@ -128,6 +151,7 @@ async function loadGoogle(directory, openBrowser) {
       }
     }),
     disconnect: () => exclusive(async () => {
+      await storage?.remove('google-session');
       tokens = undefined;
       return status();
     }),
