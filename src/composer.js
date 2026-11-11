@@ -359,7 +359,7 @@
         thumbnail.alt = image.title;
         thumbnail.loading = 'lazy';
         thumbnail.referrerPolicy = 'no-referrer';
-        card.append(thumbnail, node('small', '', `${image.artist || 'Wikimedia Commons'} · ${image.license}`));
+        card.append(thumbnail, node('small', '', `${image.artist || 'See source for creator'} · ${image.license}`));
       }
       slides.append(card);
     }
@@ -407,7 +407,7 @@
 
   function changeChatSkill() {
     const research = chatSkill.value === 'research-slides';
-    el('chat-skill-hint').textContent = research ? 'Wikipedia research · Wikimedia Commons images' : '';
+    el('chat-skill-hint').textContent = research ? 'Wikipedia research · Wikimedia Commons and Wikipedia images' : '';
     chatInput.placeholder = research ? 'Describe the topic, audience, and presentation you want…' : 'Ask about a teaching idea…';
     el('send-chat').textContent = research ? 'Research & plan' : 'Send';
   }

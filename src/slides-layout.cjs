@@ -81,7 +81,7 @@ function buildSlideRequests(plan, width, height, includeImages) {
           size: { width: { magnitude: w * scale, unit: 'PT' }, height: { magnitude: h * scale, unit: 'PT' } },
           transform: { scaleX: 1, scaleY: 1, translateX: (555 + (345 - w) / 2) * scale,
             translateY: (165 + (270 - h) / 2) * scale, unit: 'PT' } } } });
-      box(pageId, 'credit', `${(image.artist || 'Wikimedia Commons').slice(0, 45)} · ${image.license}`,
+      box(pageId, 'credit', `${(image.artist || 'See source for creator').slice(0, 45)} · ${image.license}`,
         550, 445, 350, 38, 11, cover ? 'CDDAD7' : '536766');
     }
     const citations = slide.sourceIds.map(id => '[' + sourceNumbers.get(id) + ']').join(' ');

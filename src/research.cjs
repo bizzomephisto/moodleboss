@@ -34,11 +34,12 @@ async function research(queries, imageQueries, progress) {
   }
   if (!sources.size) throw new Error('Research returned no usable sources. Try a more specific topic or check your connection.');
 
-  progress('Finding images and license information on Wikimedia Commons…');
-  const imageResults = await Promise.allSettled(imageQueries.map(query => wiki('commons.wikimedia.org', {
-    generator: 'search', gsrsearch: query, gsrnamespace: 6, gsrlimit: 5,
-    prop: 'imageinfo', iiprop: 'url|mime|size|extmetadata', iiurlwidth: 1000,
-  })));
+  progress('Finding images and rights information on Wikimedia Commons and Wikipedia…');
+  const imageResults = await Promise.allSettled(imageQueries.flatMap(query =>
+    ['commons.wikimedia.org', 'en.wikipedia.org'].map(host => wiki(host, {
+      generator: 'search', gsrsearch: query, gsrnamespace: 6, gsrlimit: 3,
+      prop: 'imageinfo', iiprop: 'url|mime|size|extmetadata', iiurlwidth: 1000,
+    }))));
   const images = new Map();
   for (const result of imageResults) {
     if (result.status !== 'fulfilled') continue;
@@ -46,15 +47,18 @@ async function research(queries, imageQueries, progress) {
       const info = page.imageinfo?.[0];
       if (!info) continue;
       const metadata = info.extmetadata ?? {};
-      const license = plain(metadata.LicenseShortName?.value);
+      const license = plain(metadata.LicenseShortName?.value || metadata.UsageTerms?.value) || 'Rights not specified';
       const url = URL.parse(info.thumburl ?? info.url);
       const pageUrl = URL.parse(info.descriptionurl);
       const mime = info.thumbmime ?? info.mime;
-      if (!/^(CC BY|CC0|Public domain)/i.test(license) || !['image/jpeg', 'image/png', 'image/gif'].includes(mime) ||
+      if (!['image/jpeg', 'image/png', 'image/gif'].includes(mime) ||
           url?.origin !== 'https://upload.wikimedia.org' || url.href.length > 1900 ||
-          pageUrl?.origin !== 'https://commons.wikimedia.org' ||
-          info.width < 300 || info.height < 200) continue;
-      images.set(page.pageid, { id: 'image_' + page.pageid, title: plain(page.title).replace(/^File:/, ''),
+          !['https://commons.wikimedia.org', 'https://en.wikipedia.org'].includes(pageUrl?.origin) ||
+          !(info.width > 0 && info.height > 0)) continue;
+      const id = (pageUrl.hostname === 'en.wikipedia.org' ? 'image_en_' : 'image_') + page.pageid;
+      const originalUrl = info.url ?? url.href;
+      if (images.has(originalUrl)) continue;
+      images.set(originalUrl, { id, title: plain(page.title).replace(/^File:/, ''),
         url: url.href, pageUrl: pageUrl.href, artist: plain(metadata.Artist?.value).slice(0, 200),
         license, licenseUrl: URL.parse(metadata.LicenseUrl?.value)?.href ?? '',
         description: plain(metadata.ImageDescription?.value).slice(0, 350),
@@ -63,7 +67,7 @@ async function research(queries, imageQueries, progress) {
   }
   const warnings = [];
   if (sourceResults.some(result => result.status === 'rejected')) warnings.push('Some research searches were unavailable.');
-  if (!images.size) warnings.push('No suitable licensed images were found. The deck will use text layouts.');
+  if (!images.size) warnings.push('No usable images were found. The deck will use text layouts.');
   else if (imageResults.some(result => result.status === 'rejected')) warnings.push('Some image searches were unavailable.');
   return { sources: [...sources.values()].slice(0, 8), images: [...images.values()].slice(0, 12), warnings };
 }

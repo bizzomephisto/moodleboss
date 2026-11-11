@@ -7,7 +7,7 @@ const { createHash } = require('node:crypto');
 const { preparePresentation } = require('../src/presentation.cjs');
 const { loadGoogle } = require('../src/google-slides.cjs');
 
-test('research, licensed images, OAuth return, and retrying a deck after a lost create response', async () => {
+test('research, images with different rights, OAuth return, and retrying a deck after a lost create response', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'moodleboss-slides-'));
   const originalFetch = global.fetch;
   let modelCalls = 0;
@@ -25,13 +25,19 @@ test('research, licensed images, OAuth return, and retrying a deck after a lost 
       modelCalls++;
       const plan = modelCalls === 1 ? { queries: ['Ergonomics'], imageQueries: ['Chair'], slideCount: 3 } :
         { title: 'Ergonomics lesson', summary: 'A lesson using researched examples.', slides: [
-          { title: 'Ergonomics', bullets: ['Design for a comfortable grip'], notes: 'Discuss grip.', sourceIds: ['source_1'], imageId: 'image_10' },
+          { title: 'Ergonomics', bullets: ['Design for a comfortable grip'], notes: 'Discuss grip.', sourceIds: ['source_1'], imageId: 'image_en_11' },
           { title: 'Observe the user', bullets: ['Study posture'], notes: 'Observe an everyday task.', sourceIds: ['source_1'], imageId: null },
           { title: 'Try it', bullets: ['Sketch a comfortable handle'], notes: 'Ask students to explain their choices.', sourceIds: ['source_1'], imageId: null },
         ] };
       return Response.json({ choices: [{ message: { content: JSON.stringify(plan) } }] });
     }
     if (url.hostname === 'en.wikipedia.org') {
+      if (url.searchParams.get('gsrnamespace') === '6') {
+        return Response.json({ query: { pages: [{ pageid: 11, title: 'File:Product photograph.jpg',
+          imageinfo: [{ url: 'https://upload.wikimedia.org/product.jpg',
+            descriptionurl: 'https://en.wikipedia.org/wiki/File:Product_photograph.jpg', mime: 'image/jpeg',
+            width: 220, height: 150, extmetadata: { LicenseShortName: { value: 'All rights reserved' } } }] }] } });
+      }
       return Response.json({ query: { pages: [{ pageid: 1, title: 'Ergonomics',
         fullurl: 'https://en.wikipedia.org/wiki/Ergonomics', extract: 'Ergonomics studies people and the systems they use.' }] } });
     }
@@ -39,9 +45,7 @@ test('research, licensed images, OAuth return, and retrying a deck after a lost 
       const image = { pageid: 10, title: 'File:Chair.jpg', imageinfo: [{ url: 'https://upload.wikimedia.org/chair.jpg',
         descriptionurl: 'https://commons.wikimedia.org/wiki/File:Chair.jpg', mime: 'image/jpeg', width: 1000, height: 600,
         extmetadata: { LicenseShortName: { value: 'CC BY-SA 4.0' }, Artist: { value: '<a>Fixture Artist</a>' } } }] };
-      const restricted = { ...image, pageid: 11, imageinfo: [{ ...image.imageinfo[0],
-        extmetadata: { LicenseShortName: { value: 'All rights reserved' } } }] };
-      return Response.json({ query: { pages: [image, restricted] } });
+      return Response.json({ query: { pages: [image] } });
     }
     if (url.href === 'https://oauth2.googleapis.com/token') {
       authCalls.push(options.body);
@@ -79,8 +83,9 @@ test('research, licensed images, OAuth return, and retrying a deck after a lost 
   try {
     const plan = await preparePresentation({ provider: 'lmstudio', endpoint: 'https://model.test/v1', model: 'fixture' }, '',
       [{ role: 'user', content: 'Create a three-slide ergonomics lesson.' }]);
-    assert.equal(plan.images.length, 1);
+    assert.equal(plan.images.length, 2);
     assert.equal(plan.images[0].artist, 'Fixture Artist');
+    assert.equal(plan.images[1].license, 'All rights reserved');
     assert.equal(plan.slides.length, 3);
     google = await loadGoogle(directory, async value => {
       const auth = new URL(value);
@@ -101,7 +106,8 @@ test('research, licensed images, OAuth return, and retrying a deck after a lost 
     assert.equal(fileCreates, 1);
     const images = batches.flat().filter(request => request.createImage);
     assert.equal(images.length, 1);
-    assert.equal(images[0].createImage.url, plan.images[0].url);
+    assert.equal(images[0].createImage.url, plan.images[1].url);
+    assert.ok(batches.flat().some(request => request.updateTextStyle?.style.link?.url === plan.images[1].pageUrl));
     assert.ok(batches.flat().some(request => request.updateTextStyle?.style.link?.url === plan.sources[0].url));
     const pageCount = slides.length;
     await google.create(plan, true);
