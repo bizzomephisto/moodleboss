@@ -95,15 +95,19 @@ function noteRequests(plan, presentation) {
   const pages = deckPages(plan);
   return pages.flatMap((slide, index) => {
     const page = presentation.slides.find(item => item.objectId === 'mb_slide_' + index);
-    const id = page?.slideProperties?.notesPage?.notesProperties?.speakerNotesObjectId;
+    const notesPage = page?.slideProperties?.notesPage;
+    const id = notesPage?.notesProperties?.speakerNotesObjectId;
     if (!id) return [];
     const sources = plan.sources.filter(source => slide.sourceIds.includes(source.id))
       .map(source => source.title + '\n' + source.url);
     const image = plan.images.find(item => item.id === slide.imageId);
     const credit = image ? `Image: ${image.title}\n${image.artist}\n${image.license}\n${image.pageUrl}\n${image.licenseUrl}` : '';
     const value = [slide.notes, ...sources, credit].filter(Boolean).join('\n\n');
-    return value ? [{ deleteText: { objectId: id, textRange: { type: 'ALL' } } },
-      { insertText: { objectId: id, text: value, insertionIndex: 0 } }] : [];
+    const shape = notesPage.pageElements?.find(element => element.objectId === id)?.shape;
+    const existing = (shape?.text?.textElements ?? []).map(element => element.textRun?.content ?? '').join('').replace(/\n$/, '');
+    if (!value || existing === value) return [];
+    const insert = { insertText: { objectId: id, text: value, insertionIndex: 0 } };
+    return existing ? [{ deleteText: { objectId: id, textRange: { type: 'ALL' } } }, insert] : [insert];
   });
 }
 

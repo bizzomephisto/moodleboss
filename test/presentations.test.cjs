@@ -82,11 +82,24 @@ test('research, images with different rights, OAuth return, and retrying a deck 
     }
     if (url.hostname === 'slides.googleapis.com' && url.pathname.endsWith(':batchUpdate')) {
       const batch = JSON.parse(options.body).requests;
+      const findNotes = id => slides.map(slide => slide.slideProperties?.notesPage)
+        .find(page => page?.notesProperties.speakerNotesObjectId === id);
+      for (const [index, request] of batch.entries()) {
+        if (request.deleteText && !findNotes(request.deleteText.objectId)?.pageElements?.[0]?.shape.text.textElements[0].textRun.content.trim()) {
+          return Response.json({ error: { message: `Invalid requests[${index}].deleteText: The startIndex 0 must be less than the endIndex 0` } }, { status: 400 });
+        }
+      }
       batches.push(batch);
       for (const request of batch) {
         if (request.deleteObject) slides = slides.filter(slide => slide.objectId !== request.deleteObject.objectId);
         if (request.createSlide) slides.push({ objectId: request.createSlide.objectId,
           slideProperties: { notesPage: { notesProperties: { speakerNotesObjectId: request.createSlide.objectId + '_notes' } } } });
+        const edit = request.insertText ?? request.deleteText;
+        const notes = edit && findNotes(edit.objectId);
+        if (notes) {
+          const content = request.insertText ? request.insertText.text + '\n' : '\n';
+          notes.pageElements = [{ objectId: edit.objectId, shape: { text: { textElements: [{ textRun: { content } }] } } }];
+        }
       }
       return Response.json({});
     }
@@ -135,9 +148,15 @@ test('research, images with different rights, OAuth return, and retrying a deck 
     assert.ok(batches.flat().some(request => request.updateTextStyle?.style.link?.url === plan.images[0].pageUrl));
     assert.ok(batches.flat().some(request => request.updateTextStyle?.style.link?.url === plan.sources[0].url));
     const pageCount = slides.length;
+    const batchCount = batches.length;
     await google.create(plan, true);
     assert.equal(fileCreates, 1);
     assert.equal(slides.length, pageCount);
+    assert.equal(batches.length, batchCount, 'Retry should leave already-written speaker notes alone');
+    const note = slides[0].slideProperties.notesPage.pageElements[0];
+    note.shape.text.textElements[0].textRun.content = 'Partial notes\n';
+    await google.create(plan, true);
+    assert.ok(batches.at(-1).some(request => request.deleteText?.objectId === note.objectId));
     await google.disconnect();
     google = await loadGoogle(directory, async () => {}, storage);
     await assert.rejects(google.create(plan, true), /Connect Google/);

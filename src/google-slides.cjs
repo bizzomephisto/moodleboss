@@ -179,7 +179,7 @@ async function loadGoogle(directory, openBrowser, storage) {
       if (!/^[\w-]+$/.test(id ?? '')) throw new Error('Google did not return a presentation ID.');
       const endpoint = 'https://slides.googleapis.com/v1/presentations/' + id;
       const shape = 'shape(placeholder,text(textElements(textRun(content))))';
-      const notesFields = `notesPage(notesProperties(speakerNotesObjectId),pageElements(${shape}))`;
+      const notesFields = `notesPage(notesProperties(speakerNotesObjectId),pageElements(objectId,${shape}))`;
       const fields = '?' + new URLSearchParams({
         fields: `presentationId,pageSize,revisionId,slides(objectId,pageElements(${shape}),slideProperties(${notesFields}))`,
       });
@@ -205,7 +205,9 @@ async function loadGoogle(directory, openBrowser, storage) {
         deck = await request(endpoint + fields);
       }
       const notes = noteRequests(plan, deck);
-      if (notes.length) await request(endpoint + ':batchUpdate', 'POST', { requests: notes });
+      if (notes.length) await request(endpoint + ':batchUpdate', 'POST', {
+        requests: notes, ...(deck.revisionId && { writeControl: { requiredRevisionId: deck.revisionId } }),
+      });
       return { id, url: `https://docs.google.com/presentation/d/${id}/edit`, title: plan.title };
     }),
   };
