@@ -3,6 +3,26 @@
 MoodleBOSS is a desktop workspace for the Moodle 4.5 sandbox and live Moodle
 sites.
 
+## Screenshots
+
+Screenshots use fictional courses, assignments, and slide decks.
+
+### Teaching Overview
+
+![Dark-mode Teaching Overview showing color-coded courses, submission counts, and upcoming activities](docs/screenshots/teaching-overview.png)
+
+### Section Builder
+
+![Section Builder with two Google Slides decks queued to upload as PDF resources](docs/screenshots/section-builder.png)
+
+### Assignment Builder
+
+![Assignment Builder with a draft handout, teaching notes, and a Moodle destination](docs/screenshots/assignment-builder.png)
+
+### Deck Builder
+
+![Slide review workspace showing a side-by-side handle comparison and controls to refine the slide](docs/screenshots/deck-builder.png)
+
 ## Run a portable build
 
 Get the archive for your system from [GitHub Releases](https://github.com/bizzomephisto/moodleboss/releases).
