@@ -77,10 +77,24 @@ svg { width: 19px; height: 19px; stroke: currentColor; stroke-width: 1.65; strok
 .draft-count { color: var(--muted); font-size: 12px; margin: 0 6px 5px; font-variant-numeric: tabular-nums; }
 .course-root { position: relative; }
 .course-root + .course-root { border-top: 1px solid var(--line); }
+.course-root + .course-colored, .course-colored + .course-root { margin-top: 4px; border-top: 0; }
+.course-colored {
+  --ink: var(--course-ink);
+  --muted: var(--course-ink);
+  --selected: var(--hover);
+  --selected-ink: var(--course-ink);
+  --focus: var(--course-ink);
+  --hover: color-mix(in srgb, var(--course-fill), var(--course-hover-mix) 13%);
+  color: var(--ink);
+  background: var(--course-fill);
+  border-radius: 7px;
+}
+.course-colored .course-items { padding-right: 5px; }
+.course-colored :is(button, summary):focus-visible { outline-offset: -2px; }
 .course-name { padding: 8px 34px 8px 7px; border-radius: 7px; font-size: 14px; font-weight: 650; overflow-wrap: anywhere; }
 .course-more { position: absolute; top: 3px; right: 3px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; }
 .course-more:hover { background: var(--hover); }
-.course-color-dot, .course-swatch::before { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 6px; }
+.course-swatch::before { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 6px; }
 #course-color-dialog { width: min(440px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 13px; color: var(--ink); background: var(--paper); }
 #course-color-dialog::backdrop { background: rgb(0 0 0 / 45%); }
 #course-color-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 12px 0; }

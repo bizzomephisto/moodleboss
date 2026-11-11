@@ -15,6 +15,7 @@ const { secureStorage } = require('./secure-storage.cjs');
 const { restoreMoodleSession, rememberMoodleSession } = require('./moodle-session.cjs');
 
 app.setName('Moodle Instructor');
+if (process.platform === 'linux') app.setDesktopName('moodleboss.desktop');
 app.enableSandbox();
 const ownsProfile = app.requestSingleInstanceLock();
 if (!ownsProfile) app.quit();
@@ -31,6 +32,8 @@ const assetTypes = new Map([
   ['/assignment.js', 'text/javascript'],
 ]);
 const windowSettings = { sandbox: true, contextIsolation: true, nodeIntegration: false };
+const windowIcon = process.platform === 'darwin' ? undefined :
+  path.join(__dirname, '../assets/desktop/moodleboss.png');
 const gradingWindows = new WeakMap();
 const openableSubmission = /\.(?:pdf|png|jpe?g|gif|webp|avif|bmp|tiff?|txt|docx?|pptx?|xlsx?|odt|odp|ods)$/i;
 let mainWindow;
@@ -182,6 +185,7 @@ function openMoodle(url, { signingIn = false, prepare = false, grading = false }
   if (moodleWindow && !moodleWindow.isDestroyed()) moodleWindow.close();
 
   const window = new BrowserWindow({
+    icon: windowIcon,
     width: signingIn ? 760 : 1050,
     height: signingIn ? 700 : 780,
     title: signingIn ? (target.live ? 'Sign in to Live Moodle' : 'Connect to Moodle Sandbox') :
@@ -357,6 +361,7 @@ function workspaceBackground(theme) {
 
 function createWindow(workspaceSession, theme) {
   mainWindow = new BrowserWindow({
+    icon: windowIcon,
     width: 1180,
     height: 800,
     title: 'MoodleBOSS',

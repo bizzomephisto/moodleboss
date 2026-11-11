@@ -14,6 +14,17 @@ Get the archive for your system from [GitHub Releases](https://github.com/bizzom
 | macOS Apple Silicon (arm64) | `MoodleBOSS.app` |
 | macOS Intel (x64) | `MoodleBOSS.app` |
 
+On Linux, download the `linux-x64.tar.gz` archive and extract it to a folder
+you plan to keep. From inside that folder, run:
+
+```bash
+bash install-desktop.sh
+```
+
+Then open **MoodleBOSS** from your Applications menu. This adds a launcher for
+your account and requires no administrator access. If you move or replace the
+extracted folder, run the script again from the new folder.
+
 The Mac builds are ad hoc signed. If macOS blocks the app after the first
 launch attempt, open **System Settings → Privacy & Security** and select
 **Open Anyway** for MoodleBOSS.

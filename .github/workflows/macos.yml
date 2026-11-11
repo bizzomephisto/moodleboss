@@ -30,6 +30,9 @@ jobs:
           ditto -x -k dist/MoodleBOSS-*-macos-*.zip "$check_dir"
           app="$check_dir/MoodleBOSS.app"
           binary="$app/Contents/MacOS/Electron"
+          icon="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$app/Contents/Info.plist")"
+          test "$icon" = moodleboss.icns
+          cmp assets/desktop/moodleboss.icns "$app/Contents/Resources/$icon"
           codesign --verify --deep --strict "$app"
           lipo "$binary" -verify_arch "$(uname -m)"
           "$binary" --user-data-dir="$check_dir/profile" --remote-debugging-port=0 >"$check_dir/app.log" 2>&1 &

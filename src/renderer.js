@@ -11,7 +11,7 @@ let courseColors = {};
 const palette = [
   ['Red', '#e34d59'], ['Coral', '#f27565'], ['Orange', '#e88b37'], ['Amber', '#e9af33'],
   ['Yellow', '#d5c632'], ['Lime', '#9eb943'], ['Green', '#50a65c'], ['Mint', '#53bf94'],
-  ['Teal', '#299c9c'], ['Cyan', '#3cb4cf'], ['Sky blue', '#5d9de4'], ['Blue', '#5767cf'],
+  ['Teal', '#299c9c'], ['Cyan', '#3cb4cf'], ['Sky blue', '#5d9de4'], ['Blue', '#5767cf', '#fff'],
   ['Violet', '#9165d5'], ['Pink', '#d56ca8'], ['Brown', '#a77755'], ['Slate', '#8290a0'],
 ];
 let savingCourseVisibility = false;
@@ -125,13 +125,6 @@ function renderCourseTree(courses) {
     });
     const header = node('summary', 'course-name');
     header.dataset.courseControl = `course-${course.id}`;
-    const color = palette[courseColors[course.id]];
-    if (color) {
-      const dot = node('span', 'course-color-dot');
-      dot.style.backgroundColor = color[1];
-      dot.setAttribute('aria-hidden', 'true');
-      header.append(dot);
-    }
     header.append(document.createTextNode(course.title));
     const items = node('div', 'course-items');
     const addControl = (key, control, group = items) => {
@@ -172,6 +165,14 @@ function renderCourseTree(courses) {
     }
     branch.append(header, items);
     const root = node('div', 'course-root');
+    const color = palette[courseColors[course.id]];
+    if (color) {
+      const [, background, lightInk] = color;
+      root.classList.add('course-colored');
+      root.style.setProperty('--course-fill', background);
+      root.style.setProperty('--course-ink', lightInk ?? '#000');
+      root.style.setProperty('--course-hover-mix', lightInk ? '#000' : '#fff');
+    }
     const more = button('⋯', 'course-more', () => openCourseColors(course));
     more.dataset.courseControl = `course-${course.id}-color`;
     more.setAttribute('aria-label', `Change color for ${course.title}`);

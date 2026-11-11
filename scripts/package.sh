@@ -29,6 +29,8 @@ trap 'rm -rf -- "$staging"' EXIT
 app_dir="$staging/app"
 mkdir "$app_dir"
 cp -R package.json package-lock.json src "$app_dir/"
+mkdir -p "$app_dir/assets/desktop"
+cp assets/desktop/moodleboss.png "$app_dir/assets/desktop/"
 npm ci --prefix "$app_dir" --omit=dev --ignore-scripts --no-audit --no-fund
 
 version="$(node -p "require('./package.json').version")"
@@ -61,9 +63,10 @@ JS
         resources="$mac_app/Contents/Resources"
         rm -f "$resources/default_app.asar"
         cp -R "$app_dir" "$resources/app"
+        cp assets/desktop/moodleboss.icns "$resources/moodleboss.icns"
         plist="$mac_app/Contents/Info.plist"
         /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName MoodleBOSS' -c 'Set :CFBundleName MoodleBOSS' \
-            -c 'Set :CFBundleIdentifier com.bizzomephisto.moodleboss' \
+            -c 'Set :CFBundleIdentifier com.bizzomephisto.moodleboss' -c 'Set :CFBundleIconFile moodleboss.icns' \
             -c "Set :CFBundleShortVersionString $version" -c "Set :CFBundleVersion $version" "$plist"
         codesign --force --deep --sign - --preserve-metadata=entitlements "$mac_app"
         codesign --verify --deep --strict "$mac_app"
@@ -86,10 +89,12 @@ JS
     if [[ "$platform" == win32 ]]; then
         mv "$bundle/electron.exe" "$bundle/MoodleBOSS.exe"
         mv "$bundle/electron_wer.dll" "$bundle/MoodleBOSS_wer.dll"
+        node scripts/windows-icon.cjs "$bundle/MoodleBOSS.exe" assets/desktop/moodleboss.ico
         archive="$name.zip"
         (cd "$staging" && zip -qr "$archive" "$name")
     else
         mv "$bundle/electron" "$bundle/MoodleBOSS"
+        cp scripts/install-desktop.sh "$bundle/"
         archive="$name.tar.gz"
         tar -C "$staging" -czf "$staging/$archive" "$name"
     fi
