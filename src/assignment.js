@@ -6,6 +6,77 @@ const visibilityButton = el('toggle-assignment-visibility');
 let managedAssignment;
 let managedSettings;
 let changingAssignment = false;
+const assignmentVisibility = new Map();
+const pendingVisibility = new Set();
+
+function updateAssignmentEye(control, id) {
+  const state = assignmentVisibility.get(id);
+  const action = state?.action;
+  const title = action === 'show' ? 'Show to students' : action === 'hide' ? 'Hide from students' :
+    state ? 'Visibility controls unavailable' : 'Toggle student visibility';
+  control.title = title;
+  control.setAttribute('aria-label', `${title} · ${control.dataset.assignmentTitle}`);
+  control.disabled = pendingVisibility.has(id) || Boolean(state && !action);
+  control.querySelector('.eye-slash').toggleAttribute('hidden', action !== 'show');
+}
+
+function updateAssignmentEyes(id) {
+  document.querySelectorAll(`[data-assignment-eye="${id}"]`).forEach(control => updateAssignmentEye(control, id));
+}
+
+function assignmentEye(assignment) {
+  const control = button('', 'assignment-eye', () => toggleAssignmentEye(assignment, control));
+  control.dataset.assignmentEye = assignment.id;
+  control.dataset.assignmentTitle = assignment.title;
+  control.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.5"/><path class="eye-slash" d="M3 3l18 18" hidden/></svg>';
+  updateAssignmentEye(control, assignment.id);
+  return control;
+}
+
+async function toggleAssignmentEye(assignment, control) {
+  const id = assignment.id;
+  if (pendingVisibility.has(id) || changingAssignment) return;
+  const target = environment;
+  const scope = visibilityScope;
+  const sidebar = Boolean(control.closest('.assignment-tree'));
+  const feedback = el(sidebar ? 'course-visibility-feedback' : 'assignment-feedback');
+  const stillCurrent = () => target === environment && scope === visibilityScope;
+  const showFeedback = (message, error = false) => {
+    feedback.textContent = message;
+    feedback.dataset.error = String(error);
+  };
+  pendingVisibility.add(id);
+  updateAssignmentEyes(id);
+  showFeedback('Checking assignment visibility…');
+  try {
+    const current = await window.workspace.assignment.settings(id);
+    if (!stillCurrent()) return;
+    if (!current.ok) throw new Error(current.message);
+    const { action, title } = current.value;
+    const knownAction = assignmentVisibility.get(id)?.action;
+    assignmentVisibility.set(id, current.value);
+    if (!action) throw new Error('Your Moodle permissions limit availability controls.');
+    if (knownAction && knownAction !== action) {
+      showFeedback('Visibility changed in Moodle. Check the eye and click again.');
+      return;
+    }
+    const result = await window.workspace.assignment.change(id, action, title);
+    if (!stillCurrent()) return;
+    if (!result.ok) throw new Error(result.message);
+    assignmentVisibility.set(id, result.value);
+    showFeedback(action === 'hide' ? 'Assignment hidden from students.' : 'Assignment set to Show. Course restrictions still apply.');
+    await refreshAfterMoodleChange();
+  } catch (error) {
+    if (stillCurrent()) showFeedback(error.message, true);
+  } finally {
+    pendingVisibility.delete(id);
+    updateAssignmentEyes(id);
+    if (stillCurrent() && (document.activeElement === control || document.activeElement === document.body)) {
+      const list = sidebar ? el('course-buttons') : el('assignments');
+      list.querySelector(`[data-assignment-eye="${id}"]`)?.focus();
+    }
+  }
+}
 
 function assignmentMessage(text, error = false) {
   assignmentStatus.textContent = text;
@@ -14,6 +85,8 @@ function assignmentMessage(text, error = false) {
 
 function renderAssignmentSettings(settings) {
   managedSettings = settings;
+  assignmentVisibility.set(managedAssignment.id, settings);
+  updateAssignmentEyes(managedAssignment.id);
   el('manage-assignment-name').textContent = settings.title;
   el('manage-assignment-visibility').textContent = settings.visibility
     ? 'Moodle availability · ' + settings.visibility

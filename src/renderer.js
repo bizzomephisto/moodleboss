@@ -161,7 +161,10 @@ function renderCourseTree(courses) {
       if (assignment.submitted !== null && assignment.needsGrading !== null) {
         link.append(node('small', 'tree-count', `${assignment.submitted} submitted · ${assignment.needsGrading} to grade`));
       }
-      addControl(`assignment-${assignment.id}`, link, assignmentGroup);
+      const row = node('div', 'assignment-tree-row');
+      addControl(`assignment-${assignment.id}`, link, row);
+      if (!environment.readOnly) row.append(assignmentEye(assignment));
+      assignmentGroup.append(row);
     }
     if (!environment.readOnly) {
       items.append(node('p', 'tree-label', 'Announcements'));
@@ -222,6 +225,7 @@ function render() {
     top.append(details);
     if (!environment.readOnly) {
       const actions = node('div', 'assignment-actions');
+      actions.append(assignmentEye(item));
       if (item.canGrade) actions.append(button('Open grading', 'row-button', () => window.workspace.open('grading', item.id)));
       const manage = button('Manage', 'row-button', () => openAssignmentControls(item));
       manage.dataset.manageAssignment = item.id;
@@ -307,6 +311,8 @@ function setDashboard(result) {
     visibilityScope = result.scope;
     hiddenCourseIds = new Set(result.hiddenCourses);
     courseColors = result.courseColors ?? {};
+    assignmentVisibility.clear();
+    el('course-visibility-feedback').textContent = '';
     el('course-visibility-error').textContent = '';
   }
   updateVisibleDashboard(document.activeElement?.dataset.courseVisibility);

@@ -93,7 +93,14 @@ svg { width: 19px; height: 19px; stroke: currentColor; stroke-width: 1.65; strok
 .assignment-tree summary { padding: 7px; margin: 0; border-radius: 7px; color: var(--ink); font-size: 13px; }
 .assignment-tree summary:hover { background: var(--hover); }
 .assignment-tree summary .draft-count { float: right; margin: 0; }
-.assignment-tree > .tree-link { padding-left: 16px; }
+.assignment-tree-row { display: flex; align-items: center; gap: 3px; }
+.assignment-tree-row > .tree-link { min-width: 0; padding-left: 16px; }
+.assignment-eye { display: inline-grid; place-items: center; flex: 0 0 auto; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); }
+.assignment-eye:hover:enabled { color: var(--ink); background: var(--hover); }
+.assignment-eye svg { width: 17px; height: 17px; }
+#course-visibility-feedback { margin: 4px 7px; font-size: 12px; color: var(--ok); }
+#course-visibility-feedback:empty { margin: 0; }
+#course-visibility-feedback[data-error="true"], #assignment-feedback[data-error="true"] { color: var(--error); }
 .tree-link { display: block; width: 100%; min-height: 34px; padding: 6px 7px; font-size: 13px; overflow-wrap: anywhere; }
 .tree-new { color: var(--selected-ink); font-weight: 630; }
 .tree-count, .tree-empty { color: var(--muted); font-size: 12px; }
