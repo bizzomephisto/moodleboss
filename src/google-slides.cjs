@@ -7,6 +7,14 @@ const { deckPages, buildSlideRequests, noteRequests } = require('./slides-layout
 const scope = 'https://www.googleapis.com/auth/drive.file';
 const tokenUrl = 'https://oauth2.googleapis.com/token';
 
+function isEmptyStarter(slide) {
+  const empty = shape => !shape?.text?.textElements?.some(element => element.textRun?.content?.trim());
+  return !slide.objectId.startsWith('mb_slide_') &&
+    (slide.pageElements ?? []).every(element => element.shape?.placeholder && empty(element.shape)) &&
+    (slide.slideProperties?.notesPage?.pageElements ?? []).every(element =>
+      element.shape?.placeholder?.type !== 'BODY' || empty(element.shape));
+}
+
 async function googleResponse(url, options) {
   let response;
   try {
@@ -170,18 +178,27 @@ async function loadGoogle(directory, openBrowser, storage) {
       }
       if (!/^[\w-]+$/.test(id ?? '')) throw new Error('Google did not return a presentation ID.');
       const endpoint = 'https://slides.googleapis.com/v1/presentations/' + id;
-      const fields = '?fields=presentationId,pageSize,slides(objectId,slideProperties(notesPage(notesProperties(speakerNotesObjectId))))';
+      const shape = 'shape(placeholder,text(textElements(textRun(content))))';
+      const notesFields = `notesPage(notesProperties(speakerNotesObjectId),pageElements(${shape}))`;
+      const fields = '?' + new URLSearchParams({
+        fields: `presentationId,pageSize,revisionId,slides(objectId,pageElements(${shape}),slideProperties(${notesFields}))`,
+      });
       let deck = await request(endpoint + fields);
       const pages = deckPages(plan);
       const completed = new Set((deck.slides ?? []).map(slide => slide.objectId));
       if (!pages.every((_slide, index) => completed.has('mb_slide_' + index))) {
-        if (completed.size) throw new Error('The presentation was changed while it was being built. Start a new presentation plan.');
+        const starter = deck.slides?.length === 1 && isEmptyStarter(deck.slides[0]) ? deck.slides[0] : null;
+        if (completed.size && !starter) throw new Error('The presentation was changed while it was being built. Start a new presentation plan.');
         const toPoints = value => value.unit === 'EMU' ? value.magnitude / 12700 : value.magnitude;
         const width = toPoints(deck.pageSize.width);
         const height = toPoints(deck.pageSize.height);
         progress('Laying out text, images, citations, and credits…');
         try {
-          await request(endpoint + ':batchUpdate', 'POST', { requests: buildSlideRequests(plan, width, height, includeImages) });
+          const requests = buildSlideRequests(plan, width, height, includeImages);
+          if (starter) requests.push({ deleteObject: { objectId: starter.objectId } });
+          await request(endpoint + ':batchUpdate', 'POST', {
+            requests, ...(deck.revisionId && { writeControl: { requiredRevisionId: deck.revisionId } }),
+          });
         } catch (error) {
           throw new Error(error.message + (includeImages ? ' If Google could not load an image, turn off Include images and retry.' : ''));
         }

@@ -29,10 +29,16 @@ test('research, images with different rights, OAuth return, and retrying a deck 
       const plan = modelCalls === 1 ? { queries: ['Ergonomics'], imageQueries: ['Chair'], slideCount: 3 } :
         { title: 'Ergonomics lesson', summary: 'A lesson using researched examples.', slides: [
           { title: 'Ergonomics', bullets: ['Design for a comfortable grip'], notes: 'Discuss grip.', sourceIds: ['source_1'], imageId: 'image_en_11' },
-          { title: 'Observe the user', bullets: ['Study posture'], notes: 'Observe an everyday task.', sourceIds: ['source_1'], imageId: null },
+          { title: 'Observe the user', bullets: ['Study posture'], notes: 'Observe an everyday task.', sourceIds: ['source_1'], imageId: 'image_web_0' },
           { title: 'Try it', bullets: ['Sketch a comfortable handle'], notes: 'Ask students to explain their choices.', sourceIds: ['source_1'], imageId: null },
         ] };
       return Response.json({ choices: [{ message: { content: JSON.stringify(plan) } }] });
+    }
+    if (url.hostname === 'duckduckgo.com') {
+      if (url.pathname === '/') return new Response('vqd="4-12345"');
+      assert.equal(url.searchParams.get('vqd'), '4-12345');
+      return Response.json({ results: [{ title: 'Chair reference', width: 800, height: 500,
+        thumbnail: 'https://tse1.mm.bing.net/th/id/fixture', url: 'https://design.example/chair' }] });
     }
     if (url.hostname === 'en.wikipedia.org') {
       if (url.searchParams.get('gsrnamespace') === '6') {
@@ -66,6 +72,9 @@ test('research, images with different rights, OAuth return, and retrying a deck 
       if (options.method === 'POST') {
         fileCreates++;
         fileCreated = true;
+        slides = [{ objectId: 'google_starter', pageElements: [
+          { shape: { placeholder: { type: 'TITLE' }, text: { textElements: [{ textRun: { content: '\n' } }] } } },
+        ] }];
         if (loseCreateResponse) { loseCreateResponse = false; throw new Error('Lost response'); }
         return Response.json({ id: 'fixtureDeck' });
       }
@@ -75,6 +84,7 @@ test('research, images with different rights, OAuth return, and retrying a deck 
       const batch = JSON.parse(options.body).requests;
       batches.push(batch);
       for (const request of batch) {
+        if (request.deleteObject) slides = slides.filter(slide => slide.objectId !== request.deleteObject.objectId);
         if (request.createSlide) slides.push({ objectId: request.createSlide.objectId,
           slideProperties: { notesPage: { notesProperties: { speakerNotesObjectId: request.createSlide.objectId + '_notes' } } } });
       }
@@ -90,9 +100,10 @@ test('research, images with different rights, OAuth return, and retrying a deck 
   try {
     const plan = await preparePresentation({ provider: 'lmstudio', endpoint: 'https://model.test/v1', model: 'fixture' }, '',
       [{ role: 'user', content: 'Create a three-slide ergonomics lesson.' }]);
-    assert.equal(plan.images.length, 2);
-    assert.equal(plan.images[0].artist, 'Fixture Artist');
-    assert.equal(plan.images[1].license, 'All rights reserved');
+    assert.equal(plan.images.length, 3);
+    assert.equal(plan.images[0].pageUrl, 'https://design.example/chair');
+    assert.equal(plan.images[1].artist, 'Fixture Artist');
+    assert.equal(plan.images[2].license, 'All rights reserved');
     assert.equal(plan.slides.length, 3);
     google = await loadGoogle(directory, async value => {
       const auth = new URL(value);
@@ -111,13 +122,17 @@ test('research, images with different rights, OAuth return, and retrying a deck 
     assert.equal(google.status().remembered, true);
     await assert.rejects(google.create(plan, true), /Could not reach Google/);
     assert.equal(authCalls.length, 2);
+    slides[0].pageElements[0].shape.text.textElements[0].textRun.content = 'Tester edited the starter';
+    await assert.rejects(google.create(plan, true), /changed while it was being built/);
+    assert.equal(batches.length, 0);
+    slides[0].pageElements[0].shape.text.textElements[0].textRun.content = '\n';
     const deck = await google.create(plan, true);
     assert.equal(deck.url, 'https://docs.google.com/presentation/d/fixtureDeck/edit');
     assert.equal(fileCreates, 1);
     const images = batches.flat().filter(request => request.createImage);
-    assert.equal(images.length, 1);
-    assert.equal(images[0].createImage.url, plan.images[1].url);
-    assert.ok(batches.flat().some(request => request.updateTextStyle?.style.link?.url === plan.images[1].pageUrl));
+    assert.deepEqual(images.map(request => request.createImage.url), [plan.images[2].url, plan.images[0].url]);
+    assert.ok(batches.flat().some(request => request.deleteObject?.objectId === 'google_starter'));
+    assert.ok(batches.flat().some(request => request.updateTextStyle?.style.link?.url === plan.images[0].pageUrl));
     assert.ok(batches.flat().some(request => request.updateTextStyle?.style.link?.url === plan.sources[0].url));
     const pageCount = slides.length;
     await google.create(plan, true);

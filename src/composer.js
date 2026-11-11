@@ -416,7 +416,7 @@
 
   function changeChatSkill() {
     const research = chatSkill.value === 'research-slides';
-    el('chat-skill-hint').textContent = research ? 'Wikipedia research · Wikimedia Commons and Wikipedia images' : '';
+    el('chat-skill-hint').textContent = research ? 'Wikipedia research · DuckDuckGo and Wikimedia images' : '';
     chatInput.placeholder = research ? 'Describe the topic, audience, and presentation you want…' : 'Ask about a teaching idea…';
     el('send-chat').textContent = research ? 'Research & plan' : 'Send';
   }
@@ -528,6 +528,7 @@
       return;
     }
     const turns = [...chatTurns, { role: 'user', content }];
+    chatInput.value = '';
     const chatStatus = el('chat-status');
     chatStatus.textContent = 'MoodleBOSS is responding…';
     renderChat(turns);
@@ -543,9 +544,10 @@
         answer = { role: 'assistant', content: await use(api.chat(history)) };
       }
       chatTurns = [...turns, answer].slice(-60);
-      if (chatInput.value.trim() === content) chatInput.value = '';
       chatStatus.textContent = '';
     } catch (error) {
+      if (!chatInput.value) chatInput.value = content;
+      else chatTurns = turns.slice(-60);
       chatStatus.textContent = error.message;
     }
     renderChat();

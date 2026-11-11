@@ -69,7 +69,7 @@ its color. Colors are saved for each Moodle site and account.
 Choose **Research & Google Slides** from the Chat skill selector. Describe the
 topic, audience, and slide count, then select **Research & plan**. MoodleBOSS
 uses your selected AI provider to research Wikipedia and choose images
-from Wikimedia Commons and English Wikipedia. Image credits include the
+from DuckDuckGo, Wikimedia Commons, and English Wikipedia. Image credits include the
 source and available rights information. The preview includes the slide outline, research links,
 and image credits. After connecting Google, select **Create in Google Slides**.
 The generated deck includes editable layouts, speaker notes, citations, and
