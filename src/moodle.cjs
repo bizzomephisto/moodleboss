@@ -260,7 +260,7 @@ async function dashboard(connection) {
 
   const events = calendarResult?.data?.events;
   const upcoming = Array.isArray(events) ? events.flatMap(event => {
-    const courseId = Number(event.course?.id) || null;
+    const courseId = Number(event.course?.id || event.courseid) || null;
     if (courseId !== null && !courseIds.has(courseId) && event.eventtype !== 'site') return [];
     const link = connection.localUrl(event.viewurl);
     const route = connection.route(link);

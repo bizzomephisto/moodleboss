@@ -12,6 +12,7 @@ const { fillAssignment } = require('./assignment-form.cjs');
 const { site: louisianaMoodle, isSignInRedirect, microsoftSignIn } = require('./microsoft-sso.cjs');
 const { loadGoogle } = require('./google-slides.cjs');
 const { secureStorage } = require('./secure-storage.cjs');
+const { restoreMoodleSession, rememberMoodleSession } = require('./moodle-session.cjs');
 
 app.setName('Moodle Instructor');
 app.enableSandbox();
@@ -70,11 +71,18 @@ function allowsLiveRequest(connection, details, url) {
     /^\/(?:pix\/|theme\/(?:styles|image|font|javascript|yui_combo)\.php$|lib\/(?:javascript|requirejs|jsrev)\.php$)/.test(route);
 }
 
-function connection(root, live, snapshotFile) {
+function connection(root, live, snapshotFile, storage) {
   const id = live ? createHash('sha256').update(root).digest('hex') : null;
   const browserSession = session.fromPartition(live ? `moodle-live-${id}` : 'persist:moodle-sandbox', { cache: !live });
   const target = { ...siteUrls(root), root, live, session: browserSession, snapshotFile, snapshot: null,
     abort: live ? new AbortController() : null };
+  if (live && storage?.available) {
+    const url = target.url('/my/courses.php');
+    const name = 'moodle-session-' + id;
+    target.restored = restoreMoodleSession(browserSession.cookies, url, storage, name).catch(() => {});
+    target.rememberSession = () => rememberMoodleSession(browserSession.cookies, url, storage, name);
+    target.forgetSession = () => storage.remove(name);
+  }
   browserSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   browserSession.setPermissionCheckHandler(() => false);
   browserSession.removeListener('will-download', preventDownload);
@@ -100,7 +108,8 @@ function visibilityScope(target) {
 
 function dashboardView(target, composer) {
   const scope = visibilityScope(target);
-  return { snapshot: target.snapshot, scope, hiddenCourses: scope ? composer.hiddenCourses(scope) : [] };
+  return { snapshot: target.snapshot, scope, hiddenCourses: scope ? composer.hiddenCourses(scope) : [],
+    courseColors: scope ? composer.courseColors(scope) : {} };
 }
 
 app.on('second-instance', () => {
@@ -245,7 +254,9 @@ async function reviewAssignment(value) {
 
 async function refresh(target, composer) {
   try {
+    await target.restored;
     const updated = await dashboard(target);
+    if (!target.abort?.signal.aborted) await target.rememberSession?.().catch(() => {});
     if (target.snapshotFile) {
       const temporaryFile = `${target.snapshotFile}.tmp`;
       await writeFile(temporaryFile, JSON.stringify(updated), { mode: 0o600 });
@@ -254,7 +265,10 @@ async function refresh(target, composer) {
     target.snapshot = updated;
     return { status: 'connected', ...dashboardView(target, composer) };
   } catch (error) {
-    if (error instanceof SignInRequired) return { status: 'login' };
+    if (error instanceof SignInRequired) {
+      if (!target.abort?.signal.aborted) await target.forgetSession?.().catch(() => {});
+      return { status: 'login' };
+    }
     return { status: 'error', message: error.message };
   }
 }
@@ -333,6 +347,15 @@ app.whenReady().then(async () => {
   });
   sandbox = connection(origin, false, path.join(dataDirectory, 'dashboard.json'));
   moodle = sandbox;
+  const savedEnvironment = composer.moodleEnvironment();
+  try {
+    if (savedEnvironment.site) {
+      lastLiveSite = liveSite(savedEnvironment.site);
+      if (savedEnvironment.live === true) moodle = connection(lastLiveSite, true, undefined, storage);
+    }
+  } catch {
+    // A previously configured site may no longer be valid.
+  }
   try {
     const cached = JSON.parse(await readFile(sandbox.snapshotFile, 'utf8'));
     if (cached?.courseScope === courseScope) sandbox.snapshot = cached;
@@ -353,20 +376,47 @@ app.whenReady().then(async () => {
     }
     return composer.saveCourseVisibility(scope, id, visible);
   });
-  handleComposer('moodle:configure', (live, site) => {
+  handleComposer('workspace:course-color', (scope, id, color) => {
+    if (!scope || scope !== visibilityScope(moodle) || !Number.isSafeInteger(id) ||
+        !moodle.snapshot.courses.some(course => course.id === id) ||
+        (color !== null && (!Number.isInteger(color) || color < 0 || color >= 16))) {
+      throw new Error('Select a valid color for a current course.');
+    }
+    return composer.saveCourseColor(scope, id, color);
+  });
+  handleComposer('moodle:configure', async (live, site) => {
     const root = live === true ? liveSite(site) : origin;
     if (moodle.root === root && moodle.live === live) return environment();
     if (moodleWindow || assignmentMutation) throw new Error('Close the Moodle window and wait for pending changes before switching.');
+    await composer.saveMoodleEnvironment({ live: live === true, site: live === true ? root : lastLiveSite });
     moodle.abort?.abort();
     if (live === true) {
-      moodle = connection(root, true);
+      moodle = connection(root, true, undefined, storage);
       lastLiveSite = root;
     } else {
       moodle = sandbox;
     }
     return environment();
   });
-  handle('moodle:connect', () => { openMoodle(moodle.url(loginPath), { signingIn: true }); });
+  handle('moodle:connect', async () => {
+    const target = moodle;
+    await target.restored;
+    if (target === moodle) openMoodle(target.url(loginPath), { signingIn: true });
+  });
+  handleComposer('moodle:forget-session', async () => {
+    const target = moodle;
+    if (!target.live || moodleWindow) throw new Error('Close the Moodle window before forgetting this sign-in.');
+    target.abort.abort();
+    await target.restored;
+    await target.refresh;
+    try {
+      await target.forgetSession?.();
+      await target.session.clearStorageData({ storages: ['cookies'] });
+    } finally {
+      if (target === moodle) moodle = connection(target.root, true, undefined, storage);
+    }
+    return environment();
+  });
   handle('moodle:refresh', () => {
     const target = moodle;
     target.refresh ??= refresh(target, composer).finally(() => { target.refresh = null; });

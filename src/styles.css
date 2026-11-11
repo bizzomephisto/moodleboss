@@ -75,8 +75,19 @@ svg { width: 19px; height: 19px; stroke: currentColor; stroke-width: 1.65; strok
 .sidebar-label { margin: 0 7px 5px; font-size: 12px; color: var(--muted); font-weight: 650; }
 .sidebar-section { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
 .draft-count { color: var(--muted); font-size: 12px; margin: 0 6px 5px; font-variant-numeric: tabular-nums; }
-.course-tree + .course-tree { border-top: 1px solid var(--line); }
-.course-name { padding: 8px 7px; border-radius: 7px; font-size: 14px; font-weight: 650; overflow-wrap: anywhere; }
+.course-root { position: relative; }
+.course-root + .course-root { border-top: 1px solid var(--line); }
+.course-name { padding: 8px 34px 8px 7px; border-radius: 7px; font-size: 14px; font-weight: 650; overflow-wrap: anywhere; }
+.course-more { position: absolute; top: 3px; right: 3px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; }
+.course-more:hover { background: var(--hover); }
+.course-color-dot, .course-swatch::before { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 6px; }
+#course-color-dialog { width: min(440px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 13px; color: var(--ink); background: var(--paper); }
+#course-color-dialog::backdrop { background: rgb(0 0 0 / 45%); }
+#course-color-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 12px 0; }
+.course-swatch { padding: 6px 3px; background: var(--paper); border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
+.course-swatch::before { content: ''; background: var(--swatch-color); }
+.course-swatch:hover, .course-swatch[aria-pressed="true"] { background: var(--selected); }
+#course-color-error { color: var(--error); }
 .course-items { padding: 0 0 7px 11px; }
 .tree-label { margin: 9px 0 1px 7px; color: var(--muted); font-size: 12px; font-weight: 650; }
 .assignment-tree summary { padding: 7px; margin: 0; border-radius: 7px; color: var(--ink); font-size: 13px; }

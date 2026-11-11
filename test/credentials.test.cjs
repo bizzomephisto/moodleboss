@@ -5,6 +5,25 @@ const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { loadComposer } = require('../src/composer.cjs');
 const { secureStorage } = require('../src/secure-storage.cjs');
+const { restoreMoodleSession, rememberMoodleSession } = require('../src/moodle-session.cjs');
+
+test('Live Moodle saves only its session cookie and restores it without extending its expiration', async () => {
+  const expiry = Date.now() / 1000 + 60;
+  const moodle = { name: 'MoodleSessionTest', value: 'fixture', hostOnly: true, path: '/',
+    secure: true, httpOnly: true, sameSite: 'lax', expirationDate: expiry };
+  const saved = new Map();
+  const storage = { read: async name => saved.get(name), write: async (name, data) => saved.set(name, data),
+    remove: async name => saved.delete(name) };
+  const url = 'https://moodle.example/my/courses.php';
+  await rememberMoodleSession({ get: async () => [moodle, { name: 'OtherCookie', value: 'ignore' }] }, url, storage, 'site');
+  const restored = [];
+  await restoreMoodleSession({ set: async cookie => restored.push(cookie) }, url, storage, 'site');
+  assert.equal(restored.length, 1);
+  assert.equal(restored[0].name, moodle.name);
+  assert.equal(restored[0].expirationDate, expiry);
+  assert.equal(restored[0].domain, undefined);
+  assert.equal(restored[0].httpOnly, true);
+});
 
 test('AI keys survive reload only on the saved endpoint and are removed by Forget key', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'moodleboss-keys-'));

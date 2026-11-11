@@ -7,6 +7,13 @@ let snapshot = null;
 let fullSnapshot = null;
 let visibilityScope = null;
 let hiddenCourseIds = new Set();
+let courseColors = {};
+const palette = [
+  ['Red', '#e34d59'], ['Coral', '#f27565'], ['Orange', '#e88b37'], ['Amber', '#e9af33'],
+  ['Yellow', '#d5c632'], ['Lime', '#9eb943'], ['Green', '#50a65c'], ['Mint', '#53bf94'],
+  ['Teal', '#299c9c'], ['Cyan', '#3cb4cf'], ['Sky blue', '#5d9de4'], ['Blue', '#5767cf'],
+  ['Violet', '#9165d5'], ['Pink', '#d56ca8'], ['Brown', '#a77755'], ['Slate', '#8290a0'],
+];
 let savingCourseVisibility = false;
 let courseId = null;
 let dashboardRefresh;
@@ -115,8 +122,16 @@ function renderCourseTree(courses) {
       if (branch.open) expandedCourses.add(course.id);
       else expandedCourses.delete(course.id);
     });
-    const header = node('summary', 'course-name', course.title);
+    const header = node('summary', 'course-name');
     header.dataset.courseControl = `course-${course.id}`;
+    const color = palette[courseColors[course.id]];
+    if (color) {
+      const dot = node('span', 'course-color-dot');
+      dot.style.backgroundColor = color[1];
+      dot.setAttribute('aria-hidden', 'true');
+      header.append(dot);
+    }
+    header.append(document.createTextNode(course.title));
     const items = node('div', 'course-items');
     const addControl = (key, control, group = items) => {
       control.dataset.courseControl = `course-${course.id}-${key}`;
@@ -152,7 +167,14 @@ function renderCourseTree(courses) {
       addControl('announcements', button('Open in Moodle', 'tree-link', () => window.workspace.open('announcements', course.id)));
     }
     branch.append(header, items);
-    return branch;
+    const root = node('div', 'course-root');
+    const more = button('⋯', 'course-more', () => openCourseColors(course));
+    more.dataset.courseControl = `course-${course.id}-color`;
+    more.setAttribute('aria-label', `Change color for ${course.title}`);
+    more.setAttribute('aria-haspopup', 'dialog');
+    more.disabled = !visibilityScope;
+    root.append(branch, more);
+    return root;
   }));
   if (!courses.length) el('course-buttons').append(node('p', 'tree-empty',
     fullSnapshot?.courses.length ? 'All current courses are hidden. Show them in Settings → Course visibility.' :
@@ -262,13 +284,16 @@ function renderCourseVisibility(focusId) {
 }
 
 function updateVisibleDashboard(focusId) {
-  const visible = item => !hiddenCourseIds.has(item.courseId);
+  const courses = fullSnapshot?.courses.filter(course => !hiddenCourseIds.has(course.id)) ?? [];
+  const visibleIds = new Set(courses.map(course => course.id));
+  const visibleNames = new Set(courses.map(course => course.title));
   snapshot = fullSnapshot && {
     ...fullSnapshot,
-    courses: fullSnapshot.courses.filter(course => !hiddenCourseIds.has(course.id)),
-    assignments: fullSnapshot.assignments.filter(visible),
-    upcoming: fullSnapshot.upcoming.filter(visible),
-    unavailableCourses: fullSnapshot.unavailableCourses.filter(id => !hiddenCourseIds.has(id)),
+    courses,
+    assignments: fullSnapshot.assignments.filter(item => visibleIds.has(item.courseId)),
+    upcoming: fullSnapshot.upcoming.filter(item => item.courseId == null
+      ? !item.course || visibleNames.has(item.course) : visibleIds.has(item.courseId)),
+    unavailableCourses: fullSnapshot.unavailableCourses.filter(id => visibleIds.has(id)),
   };
   render();
   renderCourseVisibility(focusId);
@@ -280,10 +305,47 @@ function setDashboard(result) {
   if (visibilityScope !== result.scope) {
     visibilityScope = result.scope;
     hiddenCourseIds = new Set(result.hiddenCourses);
+    courseColors = result.courseColors ?? {};
     el('course-visibility-error').textContent = '';
   }
   updateVisibleDashboard(document.activeElement?.dataset.courseVisibility);
 }
+
+function openCourseColors(course) {
+  const scope = visibilityScope;
+  const dialog = el('course-color-dialog');
+  const grid = el('course-color-grid');
+  const errorText = el('course-color-error');
+  const clear = el('clear-course-color');
+  el('course-color-name').textContent = course.title;
+  errorText.textContent = '';
+  async function save(color) {
+    const controls = [...grid.querySelectorAll('button'), clear];
+    controls.forEach(control => { control.disabled = true; });
+    try {
+      const result = await window.workspace.setCourseColor(scope, course.id, color);
+      if (!result.ok) throw new Error(result.message);
+      if (scope === visibilityScope) courseColors = result.value;
+      dialog.close();
+      render();
+    } catch (error) {
+      errorText.textContent = error.message;
+    } finally {
+      controls.forEach(control => { control.disabled = false; });
+    }
+  }
+  grid.replaceChildren(...palette.map(([name, hex], index) => {
+    const swatch = button(name, 'course-swatch', () => save(index));
+    swatch.style.setProperty('--swatch-color', hex);
+    swatch.setAttribute('aria-pressed', String(courseColors[course.id] === index));
+    return swatch;
+  }));
+  clear.onclick = () => save(null);
+  clear.disabled = courseColors[course.id] == null;
+  dialog.showModal();
+}
+
+el('close-course-color').addEventListener('click', () => el('course-color-dialog').close());
 
 async function setCourseVisibility(id, visible) {
   if (savingCourseVisibility) return;
@@ -362,6 +424,7 @@ const liveToggle = el('live-moodle');
 const liveUrl = el('live-moodle-url');
 const environmentStatus = el('moodle-environment-status');
 const applyEnvironment = el('apply-moodle-environment');
+const forgetMoodleSession = el('forget-moodle-session');
 
 function updateEnvironmentFields() {
   el('live-moodle-fields').hidden = !liveToggle.checked;
@@ -387,6 +450,7 @@ function showEnvironment(next) {
   el('moodle-connect-hint').textContent = 'Sign in to the sandbox to see your courses, upcoming activities, and grading queue.';
   environmentStatus.dataset.error = 'false';
   environmentStatus.textContent = next.live ? `Live Moodle · ${next.site}` : 'Sandbox is active.';
+  forgetMoodleSession.hidden = !next.live;
   setDashboard(next);
   setStatus('loading', 'Checking Moodle…');
   return refresh();
@@ -397,6 +461,7 @@ el('moodle-environment-form').addEventListener('submit', async event => {
   event.preventDefault();
   liveToggle.disabled = true;
   applyEnvironment.disabled = true;
+  forgetMoodleSession.disabled = true;
   updateEnvironmentFields();
   try {
     const result = await window.workspace.configure(liveToggle.checked, liveUrl.value);
@@ -408,7 +473,24 @@ el('moodle-environment-form').addEventListener('submit', async event => {
   } finally {
     liveToggle.disabled = false;
     applyEnvironment.disabled = false;
+    forgetMoodleSession.disabled = false;
     updateEnvironmentFields();
+  }
+});
+forgetMoodleSession.addEventListener('click', async () => {
+  forgetMoodleSession.disabled = true;
+  applyEnvironment.disabled = true;
+  try {
+    const result = await window.workspace.forgetMoodleSession();
+    if (!result.ok) throw new Error(result.message);
+    showEnvironment(result.value);
+    environmentStatus.textContent = 'Live Moodle sign-in removed from this device.';
+  } catch (error) {
+    environmentStatus.dataset.error = 'true';
+    environmentStatus.textContent = error.message;
+  } finally {
+    forgetMoodleSession.disabled = false;
+    applyEnvironment.disabled = false;
   }
 });
 

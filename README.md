@@ -50,15 +50,19 @@ one), and select **Apply environment**. Close Settings and choose
 Microsoft sign-in for `https://moodle.louisiana.edu`.
 
 Live mode reads your dashboard, assignment counts, and upcoming activities.
-Assignment management and publishing are available in Sandbox. Live sessions
-and dashboard data stay in memory for the current launch. MoodleBOSS starts
-in Sandbox every time. Saved drafts remain available in both modes.
+Assignment management and publishing are available in Sandbox. MoodleBOSS
+remembers the selected environment and saves the Live Moodle sign-in when
+secure storage is available. Use **Forget Live Moodle sign-in** in Settings to
+remove it from this device. Moodle may ask you to sign in when its session
+expires. Saved drafts remain available in both modes.
 
 The dashboard uses Moodle’s **In progress** course filter in both environments.
 Moodle determines which courses are in progress from course dates and completion.
 Under **Settings → Course visibility**, uncheck courses to hide them from
 the sidebar, dashboard, and assignment builder. MoodleBOSS saves this preference
 on this computer for each Moodle site and account.
+Use **⋯** beside a course in the sidebar to choose one of 16 colors or remove
+its color. Colors are saved for each Moodle site and account.
 
 ## Research and presentations in Chat
 

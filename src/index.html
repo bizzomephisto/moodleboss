@@ -184,6 +184,18 @@
       </section>
     </main>
   </div>
+  <dialog id="course-color-dialog" aria-labelledby="course-color-title">
+    <div class="settings-heading">
+      <h2 id="course-color-title">Course color</h2>
+      <button type="button" id="close-course-color" class="secondary">Done</button>
+    </div>
+    <div class="settings-content">
+      <p id="course-color-name"></p>
+      <div id="course-color-grid"></div>
+      <button type="button" id="clear-course-color" class="secondary">Remove color</button>
+      <p id="course-color-error" role="alert"></p>
+    </div>
+  </dialog>
   <dialog id="settings" aria-labelledby="settings-title">
     <div class="settings-heading"><h2 id="settings-title">Settings</h2><button type="button" id="close-settings" class="secondary">Done</button></div>
     <div class="settings-content">
@@ -201,6 +213,7 @@
             <p class="composer-hint">Live mode reads courses, assignments, and upcoming activities. It supports Moodle’s built-in login and UL Lafayette’s Microsoft sign-in.</p>
           </div>
           <button type="submit" id="apply-moodle-environment" class="secondary" disabled>Apply environment</button>
+          <button type="button" id="forget-moodle-session" class="secondary" hidden>Forget Live Moodle sign-in</button>
           <p id="moodle-environment-status" class="composer-hint" role="status"></p>
         </form>
       </section>

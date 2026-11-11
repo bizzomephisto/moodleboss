@@ -131,7 +131,8 @@ function draftSelection(state) {
 
 async function loadComposer(directory, storage) {
   const file = path.join(directory, 'composer.json');
-  let state = { settings: defaults, profiles: {}, drafts: [], activeDraftId: null, theme: 'light', hiddenCourses: {} };
+  let state = { settings: defaults, profiles: {}, drafts: [], activeDraftId: null, theme: 'light',
+    hiddenCourses: {}, courseColors: {}, moodleEnvironment: {} };
   try {
     const saved = JSON.parse(await readFile(file, 'utf8'));
     const settings = settingsFrom(saved.settings);
@@ -145,6 +146,8 @@ async function loadComposer(directory, storage) {
       activeDraftId: saved.activeDraftId ?? (saved.drafts ? null : drafts[0]?.id ?? null),
       theme: saved.theme === 'dark' ? 'dark' : 'light',
       hiddenCourses: { ...saved.hiddenCourses },
+      courseColors: { ...saved.courseColors },
+      moodleEnvironment: { ...saved.moodleEnvironment },
     };
   } catch {
     // Use defaults for a new or unreadable profile.
@@ -195,6 +198,18 @@ async function loadComposer(directory, storage) {
   return {
     get: () => ({ ...providerSelection(), ...draftSelection(state), theme: state.theme }),
     hiddenCourses,
+    courseColors: scope => state.courseColors[scope] ?? {},
+    async saveCourseColor(scope, id, color) {
+      const next = await persist(current => {
+        const colors = { ...current.courseColors[scope] };
+        if (color === null) delete colors[id];
+        else colors[id] = color;
+        return { courseColors: { ...current.courseColors, [scope]: colors } };
+      });
+      return next.courseColors[scope];
+    },
+    moodleEnvironment: () => state.moodleEnvironment,
+    saveMoodleEnvironment: moodleEnvironment => persist({ moodleEnvironment }),
     async saveCourseVisibility(scope, id, visible) {
       const next = await persist(current => {
         const ids = new Set(hiddenCourses(scope, current));
