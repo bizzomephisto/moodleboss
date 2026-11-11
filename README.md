@@ -61,8 +61,9 @@ one), and select **Apply environment**. Close Settings and choose
 Microsoft sign-in for `https://moodle.louisiana.edu`.
 
 Live mode reads your dashboard, assignment counts, and upcoming activities.
-Live Moodle starts in read-only mode on every launch. To manage assignments on
-the live site, turn off **Read-only** in **Settings → Moodle environment**.
+Live Moodle starts in read-only mode on every launch. Click the closed lock
+next to **Live Moodle** in the sidebar to enable editing, then click the open
+lock to return to read-only mode.
 New assignments open hidden in Moodle for review and require you to save them
 there. Moodle applies your account's existing permissions. MoodleBOSS
 remembers the selected environment and saves the Live Moodle sign-in when
@@ -78,16 +79,39 @@ on this computer for each Moodle site and account.
 Use **⋯** beside a course in the sidebar to choose one of 16 colors or remove
 its color. Colors are saved for each Moodle site and account.
 
-## Research and presentations in Chat
+## Deck Builder
 
-Choose **Research & Google Slides** from the Chat skill selector. Describe the
+Open **Deck Builder** and choose **Research & Google Slides**. Describe the
 topic, audience, and slide count, then select **Research & plan**. MoodleBOSS
-uses your selected AI provider to research Wikipedia and choose images
-from DuckDuckGo, Wikimedia Commons, and English Wikipedia. Image credits include the
-source and available rights information. The preview includes the slide outline, research links,
-and image credits. After connecting Google, select **Create in Google Slides**.
-The generated deck includes editable layouts, speaker notes, citations, and
-linked references. Research plans stay in the current chat session.
+searches Wikipedia, Crossref publication abstracts, and DataCite repository
+records. Those searches require no additional API keys. Your selected AI provider
+uses the results to plan the presentation and choose images from DuckDuckGo,
+Wikimedia Commons, and English Wikipedia. Image credits include the source and
+available rights information.
+
+The draft opens in the slide review workspace. Select a thumbnail to review
+that slide. Drag thumbnails or use **Move earlier** and **Move later** to change
+the order. You can edit text, speaker notes, or layout, and search for an image
+to replace or add to the selected slide. Use **Revise this slide** or **Revise
+whole deck** to compare a proposed revision before applying it.
+
+Select **Create in Google Slides** after connecting Google. The deck includes
+editable text and images, speaker notes, citations, and linked references.
+Drafts stay in the current session until exported.
+
+## Section Builder
+
+Choose a current course and enter a section title and optional description.
+Add Google Slides decks by pasting their links, choosing **Browse connected
+decks**, or selecting **Add to Section Builder** from a deck you exported.
+MoodleBOSS uses its existing Google connection to export each accessible deck
+as a PDF, then uploads those PDFs as Moodle File resources. Google limits each
+PDF export to 10 MB, and Moodle may have a smaller course upload limit.
+
+**Create hidden section** appends a section to the course. MoodleBOSS hides
+the empty section before adding its title, description, or files. Each File
+resource starts hidden too. Use Moodle to review and show the section and the
+resources when they are ready for students.
 
 ## Connect Google Slides
 

@@ -11,6 +11,7 @@ test('research, images with different rights, OAuth return, and retrying a deck 
   const directory = await mkdtemp(path.join(tmpdir(), 'moodleboss-slides-'));
   const originalFetch = global.fetch;
   let modelCalls = 0;
+  let wikipediaUnavailable = false;
   let fileCreated = false;
   let fileCreates = 0;
   let loseCreateResponse = true;
@@ -30,8 +31,8 @@ test('research, images with different rights, OAuth return, and retrying a deck 
         { title: 'Ergonomics lesson', summary: 'A lesson using researched examples.', theme: 'blueprint', slides: [
           { title: 'Ergonomics', bullets: ['Design for a comfortable grip'], notes: 'Discuss grip.', sourceIds: ['source_1'],
             layout: 'gallery', imageIds: ['image_en_11', 'image_10', 'image_en_11', 'unknown'] },
-          { title: 'Observe the user', bullets: ['Study posture'], notes: 'Observe an everyday task.', sourceIds: ['source_1'], imageId: 'image_web_0' },
-          { title: 'Try it', bullets: ['Sketch a comfortable handle'], notes: 'Ask students to explain their choices.', sourceIds: ['source_1'], imageId: null },
+          { title: 'Observe the user', bullets: ['Study posture'], notes: 'Observe an everyday task.', sourceIds: ['source_external_1'], imageId: 'image_web_0' },
+          { title: 'Try it', bullets: ['Sketch a comfortable handle'], notes: 'Ask students to explain their choices.', sourceIds: ['source_external_2'], imageId: null },
         ] };
       return Response.json({ choices: [{ message: { content: JSON.stringify(plan) } }] });
     }
@@ -48,8 +49,19 @@ test('research, images with different rights, OAuth return, and retrying a deck 
             descriptionurl: 'https://en.wikipedia.org/wiki/File:Product_photograph.jpg', mime: 'image/jpeg',
             width: 220, height: 150, extmetadata: { LicenseShortName: { value: 'All rights reserved' } } }] }] } });
       }
+      if (wikipediaUnavailable) return new Response(null, { status: 503 });
       return Response.json({ query: { pages: [{ pageid: 1, title: 'Ergonomics',
         fullurl: 'https://en.wikipedia.org/wiki/Ergonomics', extract: 'Ergonomics studies people and the systems they use.' }] } });
+    }
+    if (url.hostname === 'api.crossref.org') {
+      assert.equal(url.searchParams.get('query.bibliographic'), 'Ergonomics');
+      return Response.json({ message: { items: [{ DOI: '10.1234/Posture', title: ['Posture study'],
+        abstract: '<jats:p>Participants changed posture as the task progressed.</jats:p>' }] } });
+    }
+    if (url.hostname === 'api.datacite.org') {
+      assert.equal(url.searchParams.get('query'), 'Ergonomics');
+      return Response.json({ data: [{ attributes: { doi: '10.1234/grip', titles: [{ title: 'Grip design dataset' }],
+        descriptions: [{ descriptionType: 'Other', description: 'Grip measurements across handle shapes.' }] } }] });
     }
     if (url.hostname === 'commons.wikimedia.org') {
       const image = { pageid: 10, title: 'File:Chair.jpg', imageinfo: [{ url: 'https://upload.wikimedia.org/chair.jpg',
@@ -69,6 +81,13 @@ test('research, images with different rights, OAuth return, and retrying a deck 
         scope: 'https://www.googleapis.com/auth/drive.file' });
     }
     assert.equal(options.headers.Authorization, 'Bearer test-access');
+    if (url.href === 'https://www.googleapis.com/drive/v3/files/fixtureDeck/export?mimeType=application%2Fpdf') {
+      return new Response('%PDF-1.4\nFixture export', { headers: { 'Content-Type': 'application/pdf' } });
+    }
+    if (url.hostname === 'www.googleapis.com' && url.pathname === '/drive/v3/files/fixtureDeck') {
+      return Response.json({ name: 'Ergonomics lesson', mimeType: 'application/vnd.google-apps.presentation',
+        capabilities: { canDownload: true } });
+    }
     if (url.hostname === 'www.googleapis.com' && url.pathname === '/drive/v3/files') {
       if (options.method === 'POST') {
         fileCreates++;
@@ -79,7 +98,7 @@ test('research, images with different rights, OAuth return, and retrying a deck 
         if (loseCreateResponse) { loseCreateResponse = false; throw new Error('Lost response'); }
         return Response.json({ id: 'fixtureDeck' });
       }
-      return Response.json({ files: fileCreated ? [{ id: 'fixtureDeck' }] : [] });
+      return Response.json({ files: fileCreated ? [{ id: 'fixtureDeck', name: 'Ergonomics lesson' }] : [] });
     }
     if (url.hostname === 'slides.googleapis.com' && url.pathname.endsWith(':batchUpdate')) {
       const batch = JSON.parse(options.body).requests;
@@ -115,6 +134,15 @@ test('research, images with different rights, OAuth return, and retrying a deck 
     const plan = await preparePresentation({ provider: 'lmstudio', endpoint: 'https://model.test/v1', model: 'fixture' }, '',
       [{ role: 'user', content: 'Create a three-slide ergonomics lesson.' }]);
     assert.equal(plan.images.length, 3);
+    assert.deepEqual(plan.sources.map(source => source.url), ['https://en.wikipedia.org/wiki/Ergonomics',
+      'https://doi.org/10.1234/posture', 'https://doi.org/10.1234/grip']);
+    assert.equal(plan.sources[1].text, 'Participants changed posture as the task progressed.');
+    assert.equal(plan.sources[2].evidence, 'Repository description via DataCite');
+    wikipediaUnavailable = true;
+    const { research } = require('../src/research.cjs');
+    const fallback = await research(['Ergonomics'], [], () => {});
+    assert.deepEqual(fallback.sources.map(source => source.url), plan.sources.slice(1).map(source => source.url));
+    assert.ok(fallback.warnings.includes('Some research searches were unavailable.'));
     assert.equal(plan.images[0].pageUrl, 'https://design.example/chair');
     assert.equal(plan.images[1].artist, 'Fixture Artist');
     assert.equal(plan.images[2].license, 'All rights reserved');
@@ -144,6 +172,10 @@ test('research, images with different rights, OAuth return, and retrying a deck 
     slides[0].pageElements[0].shape.text.textElements[0].textRun.content = '\n';
     const deck = await google.create(plan, true);
     assert.equal(deck.url, 'https://docs.google.com/presentation/d/fixtureDeck/edit');
+    assert.deepEqual(await google.listDecks(), [{ url: deck.url, title: 'Ergonomics lesson' }]);
+    assert.deepEqual(await google.exportDeckPdf(deck.url),
+      { title: 'Ergonomics lesson', pdf: Buffer.from('%PDF-1.4\nFixture export') });
+    await assert.rejects(google.exportDeckPdf('https://example.test/presentation/d/fixtureDeck/edit'), /Google Slides presentation link/);
     assert.equal(fileCreates, 1);
     const images = batches.flat().filter(request => request.createImage);
     assert.deepEqual(images.map(request => request.createImage.url), [plan.images[2].url, plan.images[1].url, plan.images[0].url]);

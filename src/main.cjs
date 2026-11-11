@@ -1,5 +1,5 @@
 const { app, BrowserWindow, ipcMain, session, protocol, shell, dialog, safeStorage } = require('electron');
-const { createHash } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
 const { mkdir, readFile, rename, writeFile } = require('node:fs/promises');
 const path = require('node:path');
 const { repository } = require('../package.json');
@@ -11,6 +11,10 @@ const { loadComposer, draftFrom } = require('./composer.cjs');
 const { fillAssignment } = require('./assignment-form.cjs');
 const { site: louisianaMoodle, isSignInRedirect, microsoftSignIn } = require('./microsoft-sso.cjs');
 const { loadGoogle } = require('./google-slides.cjs');
+const { cleanSlide } = require('./presentation.cjs');
+const { findImages } = require('./research.cjs');
+const { slidePreviews } = require('./slides-layout.cjs');
+const { buildSection } = require('./section-builder.cjs');
 const { secureStorage } = require('./secure-storage.cjs');
 const { restoreMoodleSession, rememberMoodleSession } = require('./moodle-session.cjs');
 
@@ -29,7 +33,9 @@ const assetTypes = new Map([
   ['/styles.css', 'text/css'],
   ['/renderer.js', 'text/javascript'],
   ['/composer.js', 'text/javascript'],
+  ['/presentation-review.js', 'text/javascript'],
   ['/assignment.js', 'text/javascript'],
+  ['/section-builder.js', 'text/javascript'],
 ]);
 const windowSettings = { sandbox: true, contextIsolation: true, nodeIntegration: false };
 const windowIcon = process.platform === 'darwin' ? undefined :
@@ -42,11 +48,11 @@ let moodle;
 let sandbox;
 let lastLiveSite = '';
 let signInContentsId;
-let assignmentMutation = false;
+let moodleMutation = false;
 
 function requireEditing(target = moodle) {
   if (target !== moodle) throw new Error('The Moodle environment changed. Try again.');
-  if (target.readOnly) throw new Error('Live Moodle is read-only. Turn off Read-only in Settings to manage assignments.');
+  if (target.readOnly) throw new Error('Live Moodle is read-only. Click the sidebar lock to enable editing.');
   return target;
 }
 
@@ -181,6 +187,7 @@ function secureWindow(window, allowsNavigation, onBlocked) {
 
 function openMoodle(url, { signingIn = false, prepare = false, grading = false } = {}) {
   const target = moodle;
+  if (moodleMutation) throw new Error('Wait for the current Moodle change to finish.');
   if (!signingIn) requireEditing(target);
   if (moodleWindow && !moodleWindow.isDestroyed()) moodleWindow.close();
 
@@ -386,6 +393,32 @@ app.whenReady().then(async () => {
   const google = await loadGoogle(dataDirectory, url => shell.openExternal(url), storage);
   app.on('will-quit', google.close);
   const presentations = new Map();
+  const createdSections = new WeakMap();
+  const proposals = new WeakMap();
+  const exporting = new WeakSet();
+  const exportStarted = new WeakSet();
+  function presentationPlan(id) {
+    const plan = presentations.get(id);
+    if (!plan) throw new Error('This presentation plan is no longer available in this app session.');
+    return plan;
+  }
+  function editablePresentation(id, revision) {
+    const plan = presentationPlan(id);
+    if (plan.revision !== revision || plan.deck || exporting.has(plan)) throw new Error('Reopen the review to continue editing.');
+    return plan;
+  }
+  function reviewView(plan, includeImages) {
+    return { plan, previews: slidePreviews(plan, includeImages) };
+  }
+  function addPresentationImages(plan, images) {
+    const found = images.map(image => plan.images.find(existing => existing.url === image.url) ??
+      { ...image, id: 'image_' + randomUUID() });
+    const used = new Set(plan.slides.flatMap(slide => slide.imageIds));
+    const available = new Map([...found, ...plan.images].map(image => [image.id, image]));
+    plan.images = [...available.values()].filter(image => used.has(image.id) || found.some(item => item.id === image.id))
+      .concat([...available.values()].filter(image => !used.has(image.id) && !found.some(item => item.id === image.id)).slice(0, 12));
+    return found;
+  }
   const progress = message => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('presentation:progress', message);
   };
@@ -433,7 +466,7 @@ app.whenReady().then(async () => {
   handle('moodle:environment', environment);
   handleComposer('moodle:read-only', readOnly => {
     if (!moodle.live || typeof readOnly !== 'boolean') throw new Error('Open Live Moodle to change its read-only setting.');
-    if (moodleWindow || assignmentMutation) throw new Error('Close the Moodle window and wait for pending changes first.');
+    if (moodleWindow || moodleMutation) throw new Error('Close the Moodle window and wait for pending changes first.');
     moodle.readOnly = readOnly;
     return environment();
   });
@@ -456,7 +489,7 @@ app.whenReady().then(async () => {
   handleComposer('moodle:configure', async (live, site) => {
     const root = live === true ? liveSite(site) : origin;
     if (moodle.root === root && moodle.live === live) return environment();
-    if (moodleWindow || assignmentMutation) throw new Error('Close the Moodle window and wait for pending changes before switching.');
+    if (moodleWindow || moodleMutation) throw new Error('Close the Moodle window and wait for pending changes before switching.');
     await composer.saveMoodleEnvironment({ live: live === true, site: live === true ? root : lastLiveSite });
     moodle.abort?.abort();
     if (live === true) {
@@ -474,7 +507,7 @@ app.whenReady().then(async () => {
   });
   handleComposer('moodle:forget-session', async () => {
     const target = moodle;
-    if (!target.live || moodleWindow) throw new Error('Close the Moodle window before forgetting this sign-in.');
+    if (!target.live || moodleWindow || moodleMutation) throw new Error('Close the Moodle window and wait for pending changes before forgetting this sign-in.');
     target.abort.abort();
     await target.restored;
     await target.refresh;
@@ -521,19 +554,97 @@ app.whenReady().then(async () => {
   handleComposer('composer:settings', composer.saveSettings);
   handleComposer('composer:models', composer.models);
   handleComposer('composer:generate', composer.generate);
-  handleComposer('composer:chat', composer.chat);
+  handleComposer('composer:chat', (history, requestId) => {
+    if (typeof requestId !== 'string' || requestId.length !== 36) throw new Error('Invalid chat request.');
+    const contents = mainWindow.webContents;
+    return composer.chat(history, text => {
+      if (!contents.isDestroyed()) contents.send('composer:chat-text', requestId, text);
+    });
+  });
   handleComposer('presentation:prepare', async history => {
     const plan = await composer.presentation(history, progress);
+    plan.revision = 0;
     if (presentations.size >= 12) presentations.delete(presentations.keys().next().value);
     presentations.set(plan.id, plan);
     return plan;
   });
+  handleComposer('presentation:review', (id, includeImages) => reviewView(presentationPlan(id), includeImages === true));
+  handleComposer('presentation:find-images', async (id, revision, index, query) => {
+    const plan = editablePresentation(id, revision);
+    if (!Number.isInteger(index) || !plan.slides[index]) throw new Error('Select a slide first.');
+    const text = typeof query === 'string' ? query.trim().slice(0, 160) : '';
+    if (!text) throw new Error('Describe the image to find.');
+    const { images } = await findImages([text]);
+    editablePresentation(id, revision);
+    return addPresentationImages(plan, images);
+  });
+  handleComposer('presentation:revise', async (id, revision, index, instruction, includeImages) => {
+    const plan = editablePresentation(id, revision);
+    if (index !== null && (!Number.isInteger(index) || !plan.slides[index])) throw new Error('Select a slide first.');
+    const result = await composer.revisePresentation(plan, index, instruction);
+    const images = result.imageQueries?.length ? (await findImages(result.imageQueries)).images : [];
+    editablePresentation(id, revision);
+    let candidate = result;
+    if (index !== null) {
+      const copy = { ...plan, images: [...plan.images], slides: [...plan.slides] };
+      copy.slides[index] = result.slide;
+      const choices = addPresentationImages(copy, images);
+      if (choices.length) {
+        const selected = new Set(result.slide.imageIds);
+        if (result.slide.layout !== 'statement') {
+          const first = choices.find(image => !selected.has(image.id)) ?? choices[0];
+          result.slide.imageIds = [first.id, ...result.slide.imageIds.filter(image => image !== first.id)].slice(0, 4);
+        }
+      }
+      candidate = copy;
+    }
+    const token = randomUUID();
+    proposals.set(plan, { token, revision, candidate });
+    return { token, ...reviewView(candidate, includeImages === true) };
+  });
+  handleComposer('presentation:update', (id, revision, operation, includeImages) => {
+    const plan = editablePresentation(id, revision);
+    let updated = { ...plan, slides: [...plan.slides] };
+    if (operation?.type === 'accept') {
+      const proposal = proposals.get(plan);
+      if (!proposal || proposal.token !== operation.token || proposal.revision !== revision) throw new Error('Generate a new revision first.');
+      updated = proposal.candidate;
+    } else if (operation?.type === 'move') {
+      const { from, to } = operation;
+      if (![from, to].every(index => Number.isInteger(index) && plan.slides[index])) throw new Error('Select a valid slide position.');
+      updated.slides.splice(to, 0, ...updated.slides.splice(from, 1));
+    } else if (operation?.type === 'edit') {
+      const { index, slide } = operation;
+      if (!Number.isInteger(index) || !plan.slides[index]) throw new Error('Select a slide first.');
+      updated.slides[index] = cleanSlide({ ...slide, sourceIds: plan.slides[index].sourceIds }, plan);
+      if (!updated.slides[index].title) throw new Error('Enter a slide title.');
+      if (operation.dimensions) {
+        const { id: imageId, width, height } = operation.dimensions;
+        if (updated.slides[index].imageIds.includes(imageId) &&
+            [width, height].every(value => Number.isSafeInteger(value) && value > 0) && width * height <= 25_000_000) {
+          updated.images = plan.images.map(image => image.id === imageId ? { ...image, width, height } : image);
+        }
+      }
+    } else throw new Error('Choose a valid slide change.');
+    // An edited draft must never reuse a Drive file from an earlier export attempt.
+    const nextId = exportStarted.has(plan) ? randomUUID() : id;
+    updated = { ...updated, id: nextId, revision: revision + 1 };
+    presentations.delete(id);
+    presentations.set(nextId, updated);
+    return reviewView(updated, includeImages === true);
+  });
   handleComposer('presentation:create', async (id, includeImages) => {
-    const plan = presentations.get(id);
-    if (!plan || typeof includeImages !== 'boolean') throw new Error('Research a presentation in Chat first.');
-    const deck = await google.create(plan, includeImages, progress);
-    plan.deck = deck;
-    return deck;
+    const plan = presentationPlan(id);
+    if (typeof includeImages !== 'boolean' || exporting.has(plan)) throw new Error('Wait for the current export to finish.');
+    if (plan.deck) return plan.deck;
+    exporting.add(plan);
+    exportStarted.add(plan);
+    try {
+      plan.deck = await google.create(plan, includeImages, progress);
+      return plan.deck;
+    } finally {
+      exporting.delete(plan);
+    }
   });
   handleComposer('presentation:open', (id, kind, sourceId) => {
     const plan = presentations.get(id);
@@ -561,6 +672,48 @@ app.whenReady().then(async () => {
   handleComposer('google:disconnect', google.disconnect);
   handle('google:setup', () => shell.openExternal(repository.url + '#connect-google-slides'));
   handleComposer('composer:sections', sectionsFor);
+  handleComposer('section:list-decks', google.listDecks);
+  handleComposer('section:build', async value => {
+    const target = requireEditing();
+    const { courseId } = value ?? {};
+    if (!Number.isSafeInteger(courseId) || !target.snapshot?.courses.some(course => course.id === courseId)) {
+      throw new Error('Choose a course from the Moodle dashboard.');
+    }
+    const title = typeof value.title === 'string' ? value.title.trim() : '';
+    const summary = typeof value.summary === 'string' ? value.summary.trim() : '';
+    if (!title || title.length > 200) throw new Error('Enter a section title up to 200 characters.');
+    if (summary.length > 5000) throw new Error('Keep the section description to 5,000 characters or fewer.');
+    const urls = Array.isArray(value.urls) ? [...new Set(value.urls)] : [];
+    if (urls.length > 6 || urls.some(url => typeof url !== 'string' || url.length > 600)) {
+      throw new Error('Add up to six Google Slides links.');
+    }
+    if (moodleWindow || moodleMutation) throw new Error('Close the Moodle window and wait for pending changes before creating a section.');
+    moodleMutation = true;
+    const report = message => {
+      if (!mainWindow.isDestroyed()) mainWindow.webContents.send('section:progress', message);
+    };
+    try {
+      const files = [];
+      for (const url of urls) {
+        report(`Exporting Google Slides deck ${files.length + 1} of ${urls.length} to PDF…`);
+        files.push(await google.exportDeckPdf(url));
+      }
+      requireEditing(target);
+      const result = await buildSection(target, courseId, { title, summary, files }, report);
+      if (!createdSections.has(target)) createdSections.set(target, new Map());
+      createdSections.get(target).set(result.sectionId, target.snapshot.accountId);
+      return result;
+    } finally {
+      moodleMutation = false;
+    }
+  });
+  handleComposer('section:open', id => {
+    const target = requireEditing();
+    if (!target.snapshot?.accountId || createdSections.get(target)?.get(id) !== target.snapshot.accountId) {
+      throw new Error('Open the course in Moodle to view this section.');
+    }
+    openMoodle(target.url('/course/section.php?id=' + id));
+  });
   handleComposer('composer:review', reviewAssignment);
   handleComposer('moodle:assignment-settings', async id => {
     const target = requireEditing();
@@ -576,8 +729,8 @@ app.whenReady().then(async () => {
   handleComposer('moodle:change-assignment', async (id, action, expectedTitle) => {
     const target = requireEditing();
     const assignment = requireAssignment(target, id);
-    if (assignmentMutation) throw new Error('Wait for the current Moodle change to finish.');
-    assignmentMutation = true;
+    if (moodleMutation) throw new Error('Wait for the current Moodle change to finish.');
+    moodleMutation = true;
     try {
       if (action === 'delete') {
         await deleteAssignment(target, assignment, expectedTitle);
@@ -588,7 +741,7 @@ app.whenReady().then(async () => {
       }
       throw new Error('Unknown assignment action.');
     } finally {
-      assignmentMutation = false;
+      moodleMutation = false;
     }
   });
 

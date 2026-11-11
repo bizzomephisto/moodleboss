@@ -25,8 +25,9 @@ let expandedInitialCourse = false;
 const compactNavigation = matchMedia('(max-width: 820px)');
 const navigation = {
   overview: { button: 'overview', heading: 'title', name: 'Overview' },
-  builder: { button: 'new-assignment', heading: 'builder-title', name: 'Assignment builder' },
-  chat: { button: 'chat-tab', heading: 'chat-title', name: 'AI chat' },
+  section: { button: 'section-tab', heading: 'section-title', name: 'Section Builder' },
+  builder: { button: 'new-assignment', heading: 'builder-title', name: 'Assignment Builder' },
+  chat: { button: 'chat-tab', heading: 'chat-title', name: 'Deck Builder' },
 };
 
 function node(tag, className, text) {
@@ -73,6 +74,7 @@ function setView(next) {
   view = next;
   el('composer').hidden = next !== 'builder';
   el('chat-view').hidden = next !== 'chat';
+  el('section-view').hidden = next !== 'section';
   el('overview-view').hidden = next !== 'overview';
   for (const [key, item] of Object.entries(navigation)) {
     if (key === next) el(item.button).setAttribute('aria-current', 'page');
@@ -410,6 +412,7 @@ async function refreshAfterMoodleChange() {
 
 for (const item of Object.values(navigation)) el(item.heading).tabIndex = -1;
 el('chat-tab').addEventListener('click', () => navigate('chat'));
+el('section-tab').addEventListener('click', () => navigate('section'));
 el('new-assignment').addEventListener('click', () => navigate('builder'));
 el('overview').addEventListener('click', () => selectCourse(null));
 el('open-course').addEventListener('click', () => window.workspace.open('course', courseId));
@@ -434,6 +437,12 @@ const environmentStatus = el('moodle-environment-status');
 const applyEnvironment = el('apply-moodle-environment');
 const forgetMoodleSession = el('forget-moodle-session');
 const readOnly = el('live-read-only');
+const moodleLock = el('moodle-lock');
+const lockFeedback = el('moodle-lock-feedback');
+
+function setEnvironmentActionsDisabled(disabled) {
+  for (const control of [readOnly, moodleLock, applyEnvironment, forgetMoodleSession]) control.disabled = disabled;
+}
 
 function updateEnvironmentFields() {
   el('live-moodle-fields').hidden = !liveToggle.checked;
@@ -455,8 +464,11 @@ function showEnvironment(next) {
   liveToggle.checked = next.live;
   liveUrl.value = next.site;
   updateEnvironmentFields();
-  const liveAccess = next.readOnly ? 'Read-only' : 'Editing enabled';
-  el('moodle-environment').textContent = next.live ? `Live Moodle · ${liveAccess}` : 'Local sandbox · Moodle 4.5';
+  el('moodle-environment').textContent = next.live ? 'Live Moodle' : 'Local sandbox · Moodle 4.5';
+  moodleLock.hidden = !next.live;
+  moodleLock.setAttribute('aria-pressed', String(Boolean(next.readOnly)));
+  moodleLock.title = next.readOnly ? 'Unlock editing' : 'Lock editing';
+  lockFeedback.textContent = '';
   el('moodle-connect-hint').textContent = 'Sign in to the sandbox to see your courses, upcoming activities, and grading queue.';
   environmentStatus.dataset.error = 'false';
   environmentStatus.textContent = next.live ? `Live Moodle · ${next.site}` : 'Sandbox is active.';
@@ -469,30 +481,28 @@ function showEnvironment(next) {
 }
 
 liveToggle.addEventListener('change', updateEnvironmentFields);
-readOnly.addEventListener('change', async () => {
-  readOnly.disabled = true;
-  applyEnvironment.disabled = true;
-  forgetMoodleSession.disabled = true;
+async function changeReadOnly(value, fromLock = false) {
+  setEnvironmentActionsDisabled(true);
+  lockFeedback.textContent = '';
   try {
-    const result = await window.workspace.setMoodleReadOnly(readOnly.checked);
+    const result = await window.workspace.setMoodleReadOnly(value);
     if (!result.ok) throw new Error(result.message);
     showEnvironment(result.value);
   } catch (error) {
     readOnly.checked = environment.readOnly;
     environmentStatus.dataset.error = 'true';
     environmentStatus.textContent = error.message;
+    if (fromLock) lockFeedback.textContent = error.message;
   } finally {
-    readOnly.disabled = false;
-    applyEnvironment.disabled = false;
-    forgetMoodleSession.disabled = false;
+    setEnvironmentActionsDisabled(false);
   }
-});
+}
+readOnly.addEventListener('change', () => changeReadOnly(readOnly.checked));
+moodleLock.addEventListener('click', () => changeReadOnly(!environment.readOnly, true));
 el('moodle-environment-form').addEventListener('submit', async event => {
   event.preventDefault();
   liveToggle.disabled = true;
-  applyEnvironment.disabled = true;
-  forgetMoodleSession.disabled = true;
-  readOnly.disabled = true;
+  setEnvironmentActionsDisabled(true);
   updateEnvironmentFields();
   try {
     const result = await window.workspace.configure(liveToggle.checked, liveUrl.value);
@@ -503,16 +513,12 @@ el('moodle-environment-form').addEventListener('submit', async event => {
     environmentStatus.textContent = error.message;
   } finally {
     liveToggle.disabled = false;
-    applyEnvironment.disabled = false;
-    forgetMoodleSession.disabled = false;
-    readOnly.disabled = false;
+    setEnvironmentActionsDisabled(false);
     updateEnvironmentFields();
   }
 });
 forgetMoodleSession.addEventListener('click', async () => {
-  forgetMoodleSession.disabled = true;
-  applyEnvironment.disabled = true;
-  readOnly.disabled = true;
+  setEnvironmentActionsDisabled(true);
   try {
     const result = await window.workspace.forgetMoodleSession();
     if (!result.ok) throw new Error(result.message);
@@ -522,9 +528,7 @@ forgetMoodleSession.addEventListener('click', async () => {
     environmentStatus.dataset.error = 'true';
     environmentStatus.textContent = error.message;
   } finally {
-    forgetMoodleSession.disabled = false;
-    applyEnvironment.disabled = false;
-    readOnly.disabled = false;
+    setEnvironmentActionsDisabled(false);
   }
 });
 

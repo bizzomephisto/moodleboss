@@ -2,7 +2,7 @@ const { readFile, writeFile, rename } = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { complete, endpoints, hosted, listModels } = require('./ai-provider.cjs');
-const { preparePresentation } = require('./presentation.cjs');
+const { preparePresentation, revisePresentation } = require('./presentation.cjs');
 
 const defaults = {
   provider: 'lmstudio', endpoint: 'http://127.0.0.1:1234/v1', model: '',
@@ -104,7 +104,7 @@ async function generate(settings, key, draft) {
   throw new Error('The model did not return a usable assignment. Try again or choose another model.');
 }
 
-async function chat(settings, key, history) {
+async function chat(settings, key, history, onText) {
   if (!settings.model) throw new Error('Choose or enter a model in AI settings.');
   if (!Array.isArray(history)) throw new Error('Enter a message first.');
   const turns = history.slice(-11).flatMap(turn => {
@@ -116,7 +116,7 @@ async function chat(settings, key, history) {
   const reply = clean(await complete(settings, key, [
     { role: 'system', content: 'You are MoodleBOSS, an instructor’s assistant. Help brainstorm lessons, assignments, and classroom activities. Give practical examples and concise feedback. You can discuss drafts and ideas in this chat.' },
     ...turns,
-  ]), 30000).trim();
+  ], undefined, undefined, onText), 30000).trim();
   if (!reply) throw new Error('The model returned an empty reply.');
   return reply;
 }
@@ -267,8 +267,10 @@ async function loadComposer(directory, storage) {
     },
     models: () => listModels(state.settings, activeKey()),
     generate: value => generate(state.settings, activeKey(), draftFrom(value)),
-    chat: history => chat(state.settings, activeKey(), history),
+    chat: (history, onText) => chat(state.settings, activeKey(), history, onText),
     presentation: (history, progress) => preparePresentation(state.settings, activeKey(), history, progress),
+    revisePresentation: (plan, index, instruction, progress) =>
+      revisePresentation(state.settings, activeKey(), plan, index, instruction, progress),
   };
 }
 

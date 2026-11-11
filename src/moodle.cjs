@@ -75,12 +75,12 @@ function assignmentsFrom(html, courseId, { localUrl, route }) {
   });
 }
 
-async function request(connection, path, options = {}) {
+async function request(connection, path, { timeoutMs = 12000, ...options } = {}) {
   const { session, url, live } = connection;
   let response;
   if (live) connection.signInRequired = false;
   try {
-    const timeout = AbortSignal.timeout(12000);
+    const timeout = AbortSignal.timeout(timeoutMs);
     response = await session.fetch(url(path), {
       credentials: 'include',
       redirect: 'follow',
@@ -290,4 +290,5 @@ async function dashboard(connection) {
 module.exports = {
   origin, loginPath, liveSite, siteUrls, courseScope, dashboardMethods, SignInRequired, dashboard, courseSections, announcementsUrl,
   assignmentSettings, setAssignmentVisibility, deleteAssignment,
+  request, htmlPage, ajax,
 };

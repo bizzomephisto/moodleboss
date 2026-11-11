@@ -69,7 +69,7 @@
     provider.disabled = working;
     chatSkill.disabled = working;
     el('google-connect').disabled = working || !googleState.configured;
-    document.querySelectorAll('.presentation-create, .presentation-images').forEach(control => { control.disabled = working; });
+    document.querySelectorAll('.presentation-create, .presentation-images, .presentation-review-open').forEach(control => { control.disabled = working; });
     const destination = section.options.length && valueOf(course) !== null;
     const content = title.value.trim() && instructions.value.trim();
     el('review-draft').disabled = environment.readOnly || working || loadingSections || !destination || !content;
@@ -349,32 +349,8 @@
   function renderPresentation(plan) {
     const content = node('div');
     content.append(node('h2', '', plan.title), node('p', 'chat-text', plan.summary));
-    const slides = node('div', 'presentation-slides');
-    slides.dataset.deckTheme = plan.theme ?? 'studio';
     const imageIds = slide => slide.imageIds ?? (slide.imageId ? [slide.imageId] : []);
-    for (const slide of plan.slides) {
-      const card = node('article', 'presentation-slide');
-      card.append(node('h3', '', slide.title));
-      const bullets = node('ul');
-      bullets.append(...slide.bullets.map(value => node('li', '', value)));
-      card.append(bullets);
-      const gallery = node('div', 'presentation-thumbnails');
-      for (const id of imageIds(slide)) {
-        const image = plan.images.find(item => item.id === id);
-        if (!image) continue;
-        const figure = node('div');
-        const thumbnail = node('img');
-        thumbnail.src = image.url;
-        thumbnail.alt = image.title;
-        thumbnail.loading = 'lazy';
-        thumbnail.referrerPolicy = 'no-referrer';
-        figure.append(thumbnail, node('small', '', `${image.artist || 'See source for creator'} · ${image.license}`));
-        gallery.append(figure);
-      }
-      if (gallery.childElementCount) card.append(gallery);
-      slides.append(card);
-    }
-    content.append(slides);
+    content.append(node('p', 'presentation-warning', plan.slides.length + ' slides'));
     for (const warning of plan.warnings) content.append(node('p', 'presentation-warning', warning));
     const sources = node('details', 'presentation-sources');
     sources.append(node('summary', '', 'Research sources and image credits'));
@@ -406,7 +382,7 @@
         }
         el('chat-status').textContent = 'Creating Google Slides…';
         try {
-          plan.deck = await use(window.workspace.presentations.create(plan.id, include.checked));
+          plan.deck = await use(window.workspace.presentations.create(plan.id, plan.includeImages !== false));
         } catch (error) {
           showGoogle(await use(window.workspace.google.status()));
           throw error;
@@ -416,14 +392,35 @@
       }, el('chat-status'));
     });
     create.disabled = working;
-    controls.append(label, create);
+    const review = button(plan.deck ? 'Preview deck' : 'Review & refine', 'secondary presentation-review-open', () =>
+      run(() => reviewDeck(plan), el('chat-status')));
+    review.dataset.reviewId = plan.id;
+    review.disabled = working;
+    controls.append(review, label, create);
+    if (plan.deck) controls.append(button('Add to Section Builder', 'secondary', () => {
+      window.dispatchEvent(new CustomEvent('workspace:section-deck', { detail: plan.deck }));
+    }));
     content.append(controls);
     return content;
   }
 
+  function reviewDeck(plan) {
+    return openPresentationReview(plan, {
+      use, saveSettings,
+      onExport: () => {
+        const review = chatLog.querySelector(`[data-review-id="${CSS.escape(plan.id)}"]`);
+        review?.parentElement.querySelector('.presentation-create')?.click();
+      },
+      onClose: () => {
+        renderChat();
+        chatLog.querySelector(`[data-review-id="${CSS.escape(plan.id)}"]`)?.focus();
+      },
+    });
+  }
+
   function changeChatSkill() {
     const research = chatSkill.value === 'research-slides';
-    el('chat-skill-hint').textContent = research ? 'Wikipedia research · DuckDuckGo and Wikimedia images' : '';
+    el('chat-skill-hint').textContent = research ? 'Wikipedia, Crossref, and DataCite · DuckDuckGo and Wikimedia images' : '';
     chatInput.placeholder = research ? 'Describe the topic, audience, and presentation you want…' : 'Ask about a teaching idea…';
     el('send-chat').textContent = research ? 'Research & plan' : 'Send';
   }
@@ -539,6 +536,7 @@
     const chatStatus = el('chat-status');
     chatStatus.textContent = 'MoodleBOSS is responding…';
     renderChat(turns);
+    let streamedText;
     try {
       await saveSettings();
       const history = turns.map(({ role, content }) => ({ role, content }));
@@ -548,7 +546,28 @@
         answer = { role: 'assistant', presentation: plan, content: plan.title + '\n' + plan.summary +
           '\n' + plan.slides.map(slide => slide.title).join('\n') };
       } else {
-        answer = { role: 'assistant', content: await use(api.chat(history)) };
+        const entry = node('article', 'chat-entry assistant');
+        const text = node('p', 'chat-text');
+        const textNode = document.createTextNode('');
+        text.append(textNode);
+        entry.append(node('p', 'eyebrow', 'MoodleBOSS'), text);
+        entry.setAttribute('aria-busy', 'true');
+        streamedText = textNode;
+        const reply = await use(api.chat(history, delta => {
+          const follow = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
+          textNode.appendData(delta);
+          if (!entry.isConnected && textNode.data.trim()) chatLog.append(entry);
+          if (follow) chatLog.scrollTop = chatLog.scrollHeight;
+        }));
+        if (entry.isConnected) {
+          textNode.data = reply;
+          entry.removeAttribute('aria-busy');
+          if (turns.length >= 60) chatLog.firstElementChild.remove();
+          chatTurns = [...turns, { role: 'assistant', content: reply }].slice(-60);
+          chatStatus.textContent = '';
+          return;
+        }
+        answer = { role: 'assistant', content: reply };
       }
       chatTurns = [...turns, answer].slice(-60);
       chatStatus.textContent = '';
@@ -556,8 +575,20 @@
       if (!chatInput.value) chatInput.value = content;
       else chatTurns = turns.slice(-60);
       chatStatus.textContent = error.message;
+      if (streamedText?.data.trim()) {
+        renderChat([...turns, { role: 'assistant', content: streamedText.data.trim() }]);
+        return;
+      }
     }
     renderChat();
+    const plan = chatTurns.at(-1)?.presentation;
+    if (plan && !plan.deck && !chatStatus.textContent) {
+      try {
+        await reviewDeck(plan);
+      } catch (error) {
+        chatStatus.textContent = error.message;
+      }
+    }
   }));
   renderChat();
   changeChatSkill();

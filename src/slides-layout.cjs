@@ -6,7 +6,10 @@ const themes = new Map([
   ['fieldwork', { paper: 'F2F2E8', ink: '29372C', dark: '25382E', accent: '46684D', panel: 'DFE8D9', light: 'C2DBAA', display: 'Georgia' }],
 ]);
 const imageIds = slide => slide.imageIds ?? (slide.imageId ? [slide.imageId] : []);
-const slideImages = (plan, slide) => imageIds(slide).map(id => plan.images.find(image => image.id === id)).filter(Boolean);
+function slideImages(plan, slide) {
+  const limit = { statement: 0, comparison: 2, process: 3 }[slide.layout] ?? 4;
+  return imageIds(slide).slice(0, limit).map(id => plan.images.find(image => image.id === id)).filter(Boolean);
+}
 
 function fitFont(paragraphs, width, height, maximum, minimum) {
   for (let size = maximum; size >= minimum; size -= 2) {
@@ -20,32 +23,43 @@ function fitFont(paragraphs, width, height, maximum, minimum) {
 function deckPages(plan) {
   const pages = plan.slides.map(slide => ({ ...slide }));
   const credits = [
-    ...plan.sources.map((source, index) => ({ label: `[${index + 1}] ${source.title}`, url: source.url })),
-    ...plan.images.filter(image => pages.some(slide => imageIds(slide).includes(image.id))).map(image =>
+    ...plan.sources.map((source, index) => ({ label: `[${index + 1}] ${source.title.slice(0, 220)}`, url: source.url })),
+    ...plan.images.filter(image => pages.some(slide => slideImages(plan, slide).includes(image))).map(image =>
       ({ label: `${image.title.slice(0, 110)} — ${(image.artist || 'See source for artist').slice(0, 100)}, ${image.license}`,
         url: image.pageUrl })),
   ];
-  for (let index = 0; index < credits.length; index += 3) {
-    const links = credits.slice(index, index + 3);
-    pages.push({ title: index ? 'Sources and image credits, continued' : 'Sources and image credits',
-      bullets: links.map(link => link.label), links, notes: links.map(link => link.label + '\n' + link.url).join('\n\n'), references: true,
-      sourceIds: [], imageId: null });
+  let referencePage;
+  let y = 76;
+  for (const credit of credits) {
+    const label = credit.label.replace(/\s+/g, ' ').trim();
+    const h = 18 * Math.max(1, Math.ceil(label.length / 94)) + 4;
+    if (!referencePage || y + h > 481) {
+      referencePage = { title: referencePage ? 'Sources and image credits, continued' : 'Sources and image credits',
+        bullets: [], links: [], notes: '', references: true, sourceIds: [], imageId: null };
+      pages.push(referencePage);
+      y = 76;
+    }
+    referencePage.links.push({ ...credit, label, y, h });
+    referencePage.notes += (referencePage.notes ? '\n\n' : '') + label + '\n' + credit.url;
+    y += h;
   }
   return pages;
 }
 
-function buildSlideRequests(plan, width, height, includeImages) {
+function buildSlideRequests(plan, width, height, includeImages, previews) {
   const pages = deckPages(plan);
   const requests = [];
   const scale = Math.min(width / 960, height / 540);
   const theme = themes.get(plan.theme) ?? themes.get('studio');
   const sourceNumbers = new Map(plan.sources.map((source, index) => [source.id, index + 1]));
+  let preview;
   const position = (pageId, x, y, w, h) => ({
     pageObjectId: pageId,
     size: { width: { magnitude: w * scale, unit: 'PT' }, height: { magnitude: h * scale, unit: 'PT' } },
     transform: { scaleX: 1, scaleY: 1, translateX: x * scale, translateY: y * scale, unit: 'PT' },
   });
   function panel(pageId, name, x, y, w, h, fill) {
+    preview?.layers.push({ type: 'panel', x, y, w, h, fill });
     const objectId = pageId + '_' + name;
     requests.push(
       { createShape: { objectId, shapeType: 'RECTANGLE', elementProperties: position(pageId, x, y, w, h) } },
@@ -57,6 +71,7 @@ function buildSlideRequests(plan, width, height, includeImages) {
   }
   function box(pageId, name, value, x, y, w, h, size, ink, bold = false, fontFamily = 'Arial') {
     if (!value) return;
+    preview?.layers.push({ type: 'text', x, y, w, h, value, size, ink, bold, fontFamily });
     const id = pageId + '_' + name;
     requests.push(
       { createShape: { objectId: id, shapeType: 'TEXT_BOX', elementProperties: position(pageId, x, y, w, h) } },
@@ -70,7 +85,7 @@ function buildSlideRequests(plan, width, height, includeImages) {
         fields: 'spaceAbove,spaceBelow' } },
     );
   }
-  function media(pageId, images, x, y, width, height, columns) {
+  function media(pageId, images, x, y, width, height, columns, crop = false) {
     const gap = 12;
     const rows = Math.ceil(images.length / columns);
     const cellWidth = (width - (columns - 1) * gap) / columns;
@@ -79,9 +94,21 @@ function buildSlideRequests(plan, width, height, includeImages) {
       const left = x + (index % columns) * (cellWidth + gap);
       const top = y + Math.floor(index / columns) * (cellHeight + gap);
       panel(pageId, 'mat_' + index, left, top, cellWidth, cellHeight, theme.panel);
+      if (crop) {
+        const objectId = pageId + '_mat_' + index;
+        const marker = '[' + objectId + ']';
+        requests.push({ insertText: { objectId, text: marker } },
+          { replaceAllShapesWithImage: { containsText: { text: marker, matchCase: true }, pageObjectIds: [pageId],
+            imageUrl: image.url, imageReplaceMethod: 'CENTER_CROP' } });
+        preview?.layers.push({ type: 'image', x: left, y: top, w: cellWidth, h: cellHeight,
+          url: image.url, title: image.title, crop: true });
+        return;
+      }
       const fit = Math.min((cellWidth - 12) / image.width, (cellHeight - 12) / image.height);
       const w = image.width * fit;
       const h = image.height * fit;
+      preview?.layers.push({ type: 'image', x: left + (cellWidth - w) / 2, y: top + (cellHeight - h) / 2,
+        w, h, url: image.url, title: image.title });
       requests.push({ createImage: { objectId: pageId + '_image_' + index, url: image.url,
         elementProperties: position(pageId, left + (cellWidth - w) / 2, top + (cellHeight - h) / 2, w, h) } });
     });
@@ -89,28 +116,52 @@ function buildSlideRequests(plan, width, height, includeImages) {
   pages.forEach((slide, index) => {
     const pageId = 'mb_slide_' + index;
     const cover = index === 0;
-    const images = includeImages ? slideImages(plan, slide) : [];
-    const gallery = images.length > 1 && slide.layout !== 'feature';
+    const images = includeImages && slide.layout !== 'statement' ? slideImages(plan, slide) : [];
+    const detail = images.length && slide.layout === 'detail';
+    const paired = images.length > 1 && ['comparison', 'process'].includes(slide.layout);
+    const gallery = images.length > 1 && !detail && slide.layout !== 'feature';
     const statement = !images.length && (cover || slide.layout === 'statement');
     const dark = cover || statement;
     const ink = dark ? theme.paper : theme.ink;
     const accent = dark ? theme.light : theme.accent;
+    const fill = dark ? theme.dark : theme.paper;
+    preview = previews && { title: slide.title, fill, layers: [] };
+    if (previews) previews.push(preview);
     requests.push({ createSlide: { objectId: pageId, slideLayoutReference: { predefinedLayout: 'BLANK' } } },
       { updatePageProperties: { objectId: pageId, pageProperties: {
-        pageBackgroundFill: { solidFill: { color: { rgbColor: color(dark ? theme.dark : theme.paper) }, alpha: 1 } },
+        pageBackgroundFill: { solidFill: { color: { rgbColor: color(fill) }, alpha: 1 } },
       }, fields: 'pageBackgroundFill' } });
     panel(pageId, 'rule', 54, 34, 54, 5, accent);
-    const titleWidth = cover && images.length && !gallery ? 420 : 850;
+    const titleWidth = cover && images.length && !gallery && !detail ? 420 : 850;
     const titleHeight = titleWidth === 420 ? 172 : 112;
-    box(pageId, 'title', slide.title, 48, 50, titleWidth, titleHeight,
-      fitFont([slide.title], titleWidth, titleHeight, cover ? 54 : 42, 24), ink, true, theme.display);
+    box(pageId, 'title', slide.title, 48, 50, titleWidth, slide.references ? 24 : titleHeight,
+      slide.references ? 10 / scale : fitFont([slide.title], titleWidth, titleHeight, cover ? 54 : 42, 24), ink, true, theme.display);
     if (slide.references) {
       slide.links.forEach((link, linkIndex) => {
         const name = 'reference_' + linkIndex;
-        box(pageId, name, link.label, 55, 165 + linkIndex * 95, 845, 85,
-          fitFont([link.label], 845, 85, 19, 13), ink);
+        box(pageId, name, link.label, 48, link.y, 858, link.h, 10 / scale, ink);
         requests.push({ updateTextStyle: { objectId: pageId + '_' + name, textRange: { type: 'ALL' },
           style: { link: { url: link.url } }, fields: 'link' } });
+      });
+    } else if (paired) {
+      const count = slide.layout === 'comparison' ? 2 : Math.min(3, images.length);
+      const columnWidth = (852 - 12 * (count - 1)) / count;
+      media(pageId, images.slice(0, count), 54, 156, 852, 230, count, true);
+      slide.bullets.slice(0, count).forEach((bullet, i) => {
+        const x = 54 + i * (columnWidth + 12);
+        const label = slide.layout === 'process' ? `${i + 1}. ${bullet}` : bullet;
+        box(pageId, 'caption_' + i, label, x - 5, 395, columnWidth, 82,
+          fitFont([label], columnWidth, 82, 22, 15), ink, true);
+      });
+    } else if (detail) {
+      const mediaWidth = slide.bullets.length ? 545 : 852;
+      media(pageId, images, 54, 156, mediaWidth, 317, images.length > 2 ? 2 : 1);
+      const row = 310 / Math.max(1, slide.bullets.length);
+      slide.bullets.forEach((bullet, i) => {
+        const y = 156 + i * row;
+        panel(pageId, 'detail_rule_' + i, 624, y + 6, 30, 3, accent);
+        box(pageId, 'detail_' + i, bullet, 618, y + 14, 286, row - 16,
+          fitFont([bullet], 286, row - 16, 22, 15), ink);
       });
     } else if (gallery) {
       media(pageId, images, 54, 158, 852, slide.bullets.length ? 182 : 310, images.length);
@@ -142,7 +193,7 @@ function buildSlideRequests(plan, width, height, includeImages) {
     const citations = slide.sourceIds.map(id => '[' + sourceNumbers.get(id) + ']').join(' ');
     panel(pageId, 'footer_rule', 54, 486, 852, 1, accent);
     box(pageId, 'footer', `${citations}${citations ? '   ·   ' : ''}${index + 1} / ${pages.length}`,
-      48, 495, 850, 25, 11, accent);
+      48, 495, 850, 25, slide.references ? 10 / scale : 11, accent);
   });
   return requests;
 }
@@ -167,4 +218,10 @@ function noteRequests(plan, presentation) {
   });
 }
 
-module.exports = { deckPages, buildSlideRequests, noteRequests };
+function slidePreviews(plan, includeImages) {
+  const previews = [];
+  buildSlideRequests(plan, 960, 540, includeImages, previews);
+  return previews.slice(0, plan.slides.length);
+}
+
+module.exports = { deckPages, buildSlideRequests, noteRequests, slidePreviews };

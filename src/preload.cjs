@@ -13,8 +13,20 @@ contextBridge.exposeInMainWorld('workspace', {
   open: (kind, id) => ipcRenderer.invoke('moodle:open', kind, id),
   onConnected: callback => ipcRenderer.on('moodle:connected', () => callback()),
   onLoginFailed: callback => ipcRenderer.on('moodle:login-failed', (_event, message) => callback(message)),
+  sectionBuilder: {
+    listDecks: () => ipcRenderer.invoke('section:list-decks'),
+    build: draft => ipcRenderer.invoke('section:build', draft),
+    open: id => ipcRenderer.invoke('section:open', id),
+    onProgress: callback => ipcRenderer.on('section:progress', (_event, message) => callback(message)),
+  },
   presentations: {
     prepare: history => ipcRenderer.invoke('presentation:prepare', history),
+    review: (id, includeImages) => ipcRenderer.invoke('presentation:review', id, includeImages),
+    findImages: (id, revision, index, query) => ipcRenderer.invoke('presentation:find-images', id, revision, index, query),
+    revise: (id, revision, index, instruction, includeImages) =>
+      ipcRenderer.invoke('presentation:revise', id, revision, index, instruction, includeImages),
+    update: (id, revision, operation, includeImages) =>
+      ipcRenderer.invoke('presentation:update', id, revision, operation, includeImages),
     create: (id, includeImages) => ipcRenderer.invoke('presentation:create', id, includeImages),
     open: (id, kind, sourceId) => ipcRenderer.invoke('presentation:open', id, kind, sourceId),
     onProgress: callback => ipcRenderer.on('presentation:progress', (_event, message) => callback(message)),
@@ -41,7 +53,18 @@ contextBridge.exposeInMainWorld('workspace', {
     theme: theme => ipcRenderer.invoke('workspace:theme', theme),
     models: () => ipcRenderer.invoke('composer:models'),
     generate: draft => ipcRenderer.invoke('composer:generate', draft),
-    chat: history => ipcRenderer.invoke('composer:chat', history),
+    chat: async (history, onText) => {
+      const requestId = crypto.randomUUID();
+      const listener = (_event, id, text) => {
+        if (id === requestId) onText(text);
+      };
+      ipcRenderer.on('composer:chat-text', listener);
+      try {
+        return await ipcRenderer.invoke('composer:chat', history, requestId);
+      } finally {
+        ipcRenderer.removeListener('composer:chat-text', listener);
+      }
+    },
     sections: courseId => ipcRenderer.invoke('composer:sections', courseId),
     review: draft => ipcRenderer.invoke('composer:review', draft),
   },

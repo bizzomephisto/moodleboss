@@ -6,6 +6,7 @@ const { deckPages, buildSlideRequests, noteRequests } = require('./slides-layout
 
 const scope = 'https://www.googleapis.com/auth/drive.file';
 const tokenUrl = 'https://oauth2.googleapis.com/token';
+const presentationType = 'application/vnd.google-apps.presentation';
 
 function isEmptyStarter(slide) {
   const empty = shape => !shape?.text?.textElements?.some(element => element.textRun?.content?.trim());
@@ -15,17 +16,19 @@ function isEmptyStarter(slide) {
       element.shape?.placeholder?.type !== 'BODY' || empty(element.shape));
 }
 
-async function googleResponse(url, options) {
+async function googleResponse(url, options, bytes = false) {
   let response;
   try {
     response = await fetch(url, { ...options, redirect: 'error', signal: AbortSignal.timeout(45000) });
   } catch {
     throw new Error('Could not reach Google. Check your internet connection and try again.');
   }
+  if (response.ok && bytes) return response;
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = result.error?.message ?? result.error_description;
     const error = new Error(detail ? `Google: ${String(detail).slice(0, 350)}` : `Google returned HTTP ${response.status}.`);
+    error.status = response.status;
     if (typeof result.error === 'string') error.googleCode = result.error;
     throw error;
   }
@@ -77,8 +80,8 @@ async function loadGoogle(directory, openBrowser, storage) {
     tokens = next;
   }
 
-  async function request(url, method = 'GET', body) {
-    if (!tokens) throw new Error('Connect Google in Settings before creating a presentation.');
+  async function request(url, method = 'GET', body, bytes = false) {
+    if (!tokens) throw new Error('Connect Google in Settings first.');
     if (tokens.expires < Date.now() + 60000) {
       if (!tokens.refresh_token) throw new Error('Your Google session expired. Connect again in Settings.');
       try {
@@ -92,7 +95,7 @@ async function loadGoogle(directory, openBrowser, storage) {
     }
     return googleResponse(url, { method,
       headers: { Authorization: 'Bearer ' + tokens.access_token, ...(body && { 'Content-Type': 'application/json' }) },
-      body: body ? JSON.stringify(body) : undefined });
+      body: body ? JSON.stringify(body) : undefined }, bytes);
   }
 
   return {
@@ -164,6 +167,40 @@ async function loadGoogle(directory, openBrowser, storage) {
       return status();
     }),
     close: () => cancelSignIn?.(),
+    listDecks: () => exclusive(async () => {
+      const query = new URLSearchParams({
+        q: `trashed = false and mimeType = '${presentationType}'`,
+        fields: 'files(id,name)', orderBy: 'modifiedTime desc', pageSize: '50',
+      });
+      const { files } = await request('https://www.googleapis.com/drive/v3/files?' + query);
+      return (files ?? []).filter(file => /^[\w-]+$/.test(file?.id ?? '') && typeof file.name === 'string')
+        .map(file => ({ url: `https://docs.google.com/presentation/d/${file.id}/edit`, title: file.name }));
+    }),
+    exportDeckPdf: value => exclusive(async () => {
+      const url = typeof value === 'string' && URL.parse(value);
+      const id = url?.origin === 'https://docs.google.com' && !url.username && !url.password &&
+        url.pathname.match(/^\/presentation\/(?:u\/\d+\/)?d\/([\w-]{1,200})(?:\/|$)/)?.[1];
+      if (!id) throw new Error('Enter a Google Slides presentation link.');
+      const endpoint = 'https://www.googleapis.com/drive/v3/files/' + id;
+      let metadata;
+      try {
+        metadata = await request(endpoint + '?fields=name,mimeType,capabilities(canDownload)');
+      } catch (error) {
+        if ([403, 404].includes(error.status)) {
+          throw new Error('Google has not granted MoodleBOSS access to this deck. Choose a deck from your connected list.');
+        }
+        throw error;
+      }
+      if (metadata.mimeType !== presentationType || metadata.capabilities?.canDownload === false) {
+        throw new Error('Google did not allow PDF export for this presentation.');
+      }
+      const response = await request(endpoint + '/export?mimeType=application%2Fpdf', 'GET', undefined, true);
+      const pdf = Buffer.from(await response.arrayBuffer());
+      if (pdf.length > 10 * 1024 * 1024 || pdf.subarray(0, 5).toString('ascii') !== '%PDF-') {
+        throw new Error('Google did not return a usable PDF within the 10 MB export limit.');
+      }
+      return { title: String(metadata.name || 'Presentation').slice(0, 200), pdf };
+    }),
     create: (plan, includeImages, progress = () => {}) => exclusive(async () => {
       progress('Creating your Google Slides presentation…');
       const query = new URLSearchParams({ q: `trashed = false and appProperties has { key='moodlebossPlan' and value='${plan.id}' }`,
@@ -172,7 +209,7 @@ async function loadGoogle(directory, openBrowser, storage) {
       let id = existing.files?.[0]?.id;
       if (!id) {
         const created = await request('https://www.googleapis.com/drive/v3/files?fields=id', 'POST', {
-          name: plan.title, mimeType: 'application/vnd.google-apps.presentation', appProperties: { moodlebossPlan: plan.id },
+          name: plan.title, mimeType: presentationType, appProperties: { moodlebossPlan: plan.id },
         });
         id = created.id;
       }
