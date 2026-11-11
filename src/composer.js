@@ -72,8 +72,8 @@
     document.querySelectorAll('.presentation-create, .presentation-images').forEach(control => { control.disabled = working; });
     const destination = section.options.length && valueOf(course) !== null;
     const content = title.value.trim() && instructions.value.trim();
-    el('review-draft').disabled = environment.live || working || loadingSections || !destination || !content;
-    el('review-hint').textContent = environment.live ? 'Live Moodle is read-only. You can save drafts locally.' :
+    el('review-draft').disabled = environment.readOnly || working || loadingSections || !destination || !content;
+    el('review-hint').textContent = environment.readOnly ? 'Live Moodle is read-only. You can save drafts locally.' :
       loadingSections ? 'Loading Moodle sections…' :
       !destination ? 'Choose a course and section in Moodle details.' :
       !content ? 'Add a title and handout before review.' : 'New assignments open hidden in Moodle.';
@@ -175,9 +175,9 @@
   }
 
   function loadCourses(preferred = null, preferredSection = null) {
-    course.disabled = environment.live;
-    section.disabled = environment.live;
-    if (environment.live) {
+    course.disabled = environment.readOnly;
+    section.disabled = environment.readOnly;
+    if (environment.readOnly) {
       savedTarget = { courseId: preferred, section: preferredSection };
       sectionRequest++;
       course.replaceChildren();
@@ -306,7 +306,7 @@
   function refreshCourses() {
     const selected = savedTarget ?? { courseId: valueOf(course), section: valueOf(section) ?? pendingSection };
     loadCourses(selected.courseId, selected.section);
-    if (snapshot && !environment.live) savedTarget = hiddenCourseIds.has(selected.courseId) ? selected : null;
+    if (snapshot && !environment.readOnly) savedTarget = hiddenCourseIds.has(selected.courseId) ? selected : null;
   }
 
   function appendActivity(role, text) {

@@ -134,7 +134,7 @@ async function announcementsUrl(connection, courseId) {
 }
 
 async function ajax(connection, sesskey, calls) {
-  if (connection.live && calls.some(call => !dashboardMethods.has(call.methodname))) {
+  if (connection.readOnly && calls.some(call => !dashboardMethods.has(call.methodname))) {
     throw new Error('Live Moodle is read-only.');
   }
   const params = new URLSearchParams({ sesskey, info: calls.map(call => call.methodname).join(',') });

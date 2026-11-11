@@ -1,9 +1,9 @@
 {
   "name": "moodle-instructor",
   "productName": "Moodle Instructor",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "private": true,
-  "description": "Moodle instructor workspace with sandbox and read-only live testing",
+  "description": "Moodle instructor workspace with sandbox and optional live editing",
   "repository": {
     "type": "git",
     "url": "https://github.com/bizzomephisto/moodleboss"

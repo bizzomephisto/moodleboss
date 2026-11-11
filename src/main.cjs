@@ -39,9 +39,10 @@ let lastLiveSite = '';
 let signInContentsId;
 let assignmentMutation = false;
 
-function requireSandbox() {
-  if (moodle.live) throw new Error('Live Moodle is read-only. Switch to Sandbox to manage assignments.');
-  return sandbox;
+function requireEditing(target = moodle) {
+  if (target !== moodle) throw new Error('The Moodle environment changed. Try again.');
+  if (target.readOnly) throw new Error('Live Moodle is read-only. Turn off Read-only in Settings to manage assignments.');
+  return target;
 }
 
 function allowsLiveRequest(connection, details, url) {
@@ -52,6 +53,7 @@ function allowsLiveRequest(connection, details, url) {
     if (connection.root === louisianaMoodle && isSignInRedirect(details.url)) connection.signInRequired = true;
     return false;
   }
+  if (!connection.readOnly && !signingIn) return true;
   if (details.method === 'POST') {
     if (signingIn && connection.signIn?.acceptsCallback(details, url)) return true;
     if (route === loginPath) return signingIn && !url.search;
@@ -74,7 +76,7 @@ function allowsLiveRequest(connection, details, url) {
 function connection(root, live, snapshotFile, storage) {
   const id = live ? createHash('sha256').update(root).digest('hex') : null;
   const browserSession = session.fromPartition(live ? `moodle-live-${id}` : 'persist:moodle-sandbox', { cache: !live });
-  const target = { ...siteUrls(root), root, live, session: browserSession, snapshotFile, snapshot: null,
+  const target = { ...siteUrls(root), root, live, readOnly: live, session: browserSession, snapshotFile, snapshot: null,
     abort: live ? new AbortController() : null };
   if (live && storage?.available) {
     const url = target.url('/my/courses.php');
@@ -133,14 +135,15 @@ function secureWindow(window, allowsNavigation, onBlocked) {
 
 function openMoodle(url, { signingIn = false, prepare = false } = {}) {
   const target = moodle;
-  if (!signingIn) requireSandbox();
+  if (!signingIn) requireEditing(target);
   if (moodleWindow && !moodleWindow.isDestroyed()) moodleWindow.close();
 
   const window = new BrowserWindow({
     width: signingIn ? 760 : 1050,
     height: signingIn ? 700 : 780,
     title: signingIn ? (target.live ? 'Sign in to Live Moodle' : 'Connect to Moodle Sandbox') :
-      prepare ? 'Review assignment in Moodle' : 'Moodle Sandbox',
+      prepare ? (target.live ? 'Review assignment in Live Moodle' : 'Review assignment in Moodle') :
+        (target.live ? 'Live Moodle' : 'Moodle Sandbox'),
     show: !prepare,
     autoHideMenuBar: true,
     parent: mainWindow,
@@ -193,17 +196,17 @@ function openMoodle(url, { signingIn = false, prepare = false } = {}) {
   return { window, loaded };
 }
 
-function refreshAfterAssignmentEdit(window) {
+function refreshAfterAssignmentEdit(window, target) {
   window.webContents.on('did-navigate', (_event, value) => {
-    const destination = sandbox.localUrl(value)?.pathname;
+    const destination = target.route(target.localUrl(value));
     if (['/course/view.php', '/course/section.php', '/mod/assign/view.php'].includes(destination)) {
       if (!mainWindow.isDestroyed()) mainWindow.webContents.send('moodle:connected');
     }
   });
 }
 
-function requireAssignment(id) {
-  const assignment = requireSandbox().snapshot?.assignments.find(item => item.id === id);
+function requireAssignment(target, id) {
+  const assignment = target.snapshot?.assignments.find(item => item.id === id);
   if (!assignment) throw new Error('This assignment is no longer in your Moodle snapshot. Refresh and try again.');
   return assignment;
 }
@@ -212,8 +215,7 @@ function publicAssignmentSettings({ title, visibility, action }) {
   return { title, visibility, action };
 }
 
-async function sectionsFor(courseId) {
-  const target = requireSandbox();
+async function sectionsFor(courseId, target = requireEditing()) {
   if (!Number.isSafeInteger(courseId) || !target.snapshot?.courses.some(course => course.id === courseId)) {
     throw new Error('Choose a course from the Moodle dashboard.');
   }
@@ -221,6 +223,7 @@ async function sectionsFor(courseId) {
 }
 
 async function reviewAssignment(value) {
+  const target = requireEditing();
   const draft = draftFrom(value);
   if (!draft.title.trim() || !draft.instructions.trim()) {
     throw new Error('Enter a title and instructions before opening Moodle.');
@@ -228,23 +231,25 @@ async function reviewAssignment(value) {
   if (draft.cutoffEnabled && (!draft.cutoff || (draft.due && draft.cutoff < draft.due))) {
     throw new Error('Set a cutoff at or after the due date, or turn it off.');
   }
-  const sections = await sectionsFor(draft.courseId);
+  const sections = await sectionsFor(draft.courseId, target);
   if (!sections.some(section => section.number === draft.section)) {
     throw new Error('Choose an available Moodle course section.');
   }
 
   const params = new URLSearchParams({ add: 'assign', course: draft.courseId, section: draft.section });
-  const { window, loaded } = openMoodle(`${origin}/course/modedit.php?${params}`, { prepare: true });
+  requireEditing(target);
+  const { window, loaded } = openMoodle(target.url(`/course/modedit.php?${params}`), { prepare: true });
   try {
     if (!(await loaded) || window.isDestroyed()) throw new Error('The Moodle assignment form could not load.');
-    const page = sandbox.localUrl(window.webContents.getURL());
-    if (page?.pathname === loginPath) throw new SignInRequired();
-    if (page?.pathname !== '/course/modedit.php' || page.searchParams.get('add') !== 'assign') {
+    const page = target.localUrl(window.webContents.getURL());
+    const route = target.route(page);
+    if (route === loginPath) throw new SignInRequired();
+    if (route !== '/course/modedit.php' || page.searchParams.get('add') !== 'assign') {
       throw new Error('Moodle did not open a new assignment form for this course.');
     }
     const result = await window.webContents.executeJavaScript(`(${fillAssignment.toString()})(${JSON.stringify(draft)})`);
     if (!result?.ok) throw new Error(result?.error || 'The Moodle form could not be filled.');
-    refreshAfterAssignmentEdit(window);
+    refreshAfterAssignmentEdit(window, target);
     window.show();
   } catch (error) {
     if (!window.isDestroyed()) window.close();
@@ -364,10 +369,16 @@ app.whenReady().then(async () => {
   }
 
   const environment = () => ({
-    ...dashboardView(moodle, composer), live: moodle.live, site: lastLiveSite, microsoft: moodle.root === louisianaMoodle,
+    ...dashboardView(moodle, composer), live: moodle.live, readOnly: moodle.readOnly, site: lastLiveSite, microsoft: moodle.root === louisianaMoodle,
     appVersion: app.getVersion(), repositoryUrl: repository.url,
   });
   handle('moodle:environment', environment);
+  handleComposer('moodle:read-only', readOnly => {
+    if (!moodle.live || typeof readOnly !== 'boolean') throw new Error('Open Live Moodle to change its read-only setting.');
+    if (moodleWindow || assignmentMutation) throw new Error('Close the Moodle window and wait for pending changes first.');
+    moodle.readOnly = readOnly;
+    return environment();
+  });
   handle('workspace:open-repository', () => shell.openExternal(repository.url));
   handleComposer('workspace:course-visibility', (scope, id, visible) => {
     if (!scope || scope !== visibilityScope(moodle) || !Number.isSafeInteger(id) ||
@@ -423,20 +434,22 @@ app.whenReady().then(async () => {
     return target.refresh;
   });
   handle('moodle:open', async (kind, id) => {
-    const { snapshot, localUrl } = requireSandbox();
+    const target = requireEditing();
+    const { snapshot, url, localUrl, route } = target;
     if (!Number.isSafeInteger(id) || id < 1) return;
     const course = snapshot?.courses.find(course => course.id === id);
     const assignment = snapshot?.assignments.find(assignment => assignment.id === id);
     const event = snapshot?.upcoming.find(event => event.id === id);
-    if (kind === 'course' && course) openMoodle(`${origin}/course/view.php?id=${id}`);
+    if (kind === 'course' && course) openMoodle(url(`/course/view.php?id=${id}`));
     if (kind === 'announcements' && course) {
-      const url = await announcementsUrl(sandbox, id).catch(() => `${origin}/mod/forum/index.php?id=${id}`);
-      openMoodle(url);
+      const link = await announcementsUrl(target, id).catch(() => url(`/mod/forum/index.php?id=${id}`));
+      requireEditing(target);
+      openMoodle(link);
     }
-    if (kind === 'assignment' && assignment) openMoodle(`${origin}/mod/assign/view.php?id=${id}`);
-    if (kind === 'grading' && assignment?.canGrade) openMoodle(`${origin}/mod/assign/view.php?id=${id}&action=grading`);
-    if (kind === 'event' && localUrl(event?.path)?.pathname === '/calendar/view.php') {
-      openMoodle(new URL(event.path, origin).href);
+    if (kind === 'assignment' && assignment) openMoodle(url(`/mod/assign/view.php?id=${id}`));
+    if (kind === 'grading' && assignment?.canGrade) openMoodle(url(`/mod/assign/view.php?id=${id}&action=grading`));
+    if (kind === 'event' && event?.path && route(localUrl(url(event.path))) === '/calendar/view.php') {
+      openMoodle(url(event.path));
     }
   });
   handleComposer('composer:load', composer.get);
@@ -491,24 +504,29 @@ app.whenReady().then(async () => {
   handle('google:setup', () => shell.openExternal(repository.url + '#connect-google-slides'));
   handleComposer('composer:sections', sectionsFor);
   handleComposer('composer:review', reviewAssignment);
-  handleComposer('moodle:assignment-settings', async id =>
-    publicAssignmentSettings(await assignmentSettings(sandbox, requireAssignment(id))));
+  handleComposer('moodle:assignment-settings', async id => {
+    const target = requireEditing();
+    return publicAssignmentSettings(await assignmentSettings(target, requireAssignment(target, id)));
+  });
   handleComposer('moodle:edit-assignment', async id => {
-    await assignmentSettings(sandbox, requireAssignment(id));
-    const { window } = openMoodle(`${origin}/course/modedit.php?update=${id}&return=1`);
-    refreshAfterAssignmentEdit(window);
+    const target = requireEditing();
+    await assignmentSettings(target, requireAssignment(target, id));
+    requireEditing(target);
+    const { window } = openMoodle(target.url(`/course/modedit.php?update=${id}&return=1`));
+    refreshAfterAssignmentEdit(window, target);
   });
   handleComposer('moodle:change-assignment', async (id, action, expectedTitle) => {
-    const assignment = requireAssignment(id);
+    const target = requireEditing();
+    const assignment = requireAssignment(target, id);
     if (assignmentMutation) throw new Error('Wait for the current Moodle change to finish.');
     assignmentMutation = true;
     try {
       if (action === 'delete') {
-        await deleteAssignment(sandbox, assignment, expectedTitle);
+        await deleteAssignment(target, assignment, expectedTitle);
         return null;
       }
       if (action === 'hide' || action === 'show') {
-        return publicAssignmentSettings(await setAssignmentVisibility(sandbox, assignment, action, expectedTitle));
+        return publicAssignmentSettings(await setAssignmentVisibility(target, assignment, action, expectedTitle));
       }
       throw new Error('Unknown assignment action.');
     } finally {

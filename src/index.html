@@ -210,12 +210,16 @@
           <div id="live-moodle-fields" hidden>
             <label for="live-moodle-url">Moodle site URL</label>
             <input id="live-moodle-url" type="url" maxlength="500" spellcheck="false" placeholder="https://moodle.example.edu">
-            <p class="composer-hint">Live mode reads courses, assignments, and upcoming activities. It supports Moodle’s built-in login and UL Lafayette’s Microsoft sign-in.</p>
+            <p class="composer-hint">Live Moodle supports Moodle’s built-in login and UL Lafayette’s Microsoft sign-in.</p>
           </div>
           <button type="submit" id="apply-moodle-environment" class="secondary" disabled>Apply environment</button>
           <button type="button" id="forget-moodle-session" class="secondary" hidden>Forget Live Moodle sign-in</button>
           <p id="moodle-environment-status" class="composer-hint" role="status"></p>
         </form>
+        <div id="live-read-only-settings" hidden>
+          <label class="theme-toggle"><input id="live-read-only" type="checkbox" checked> Read-only</label>
+          <p class="composer-hint">Turn off read-only to manage assignments on the live site. Live Moodle starts in read-only mode each time you launch the app.</p>
+        </div>
       </section>
       <section class="moodle-settings" aria-labelledby="course-visibility-title">
         <h3 class="settings-section-title" id="course-visibility-title">Course visibility</h3>

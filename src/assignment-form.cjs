@@ -1,4 +1,4 @@
-// Runs only inside the new-assignment form on the sandbox origin.
+// Runs inside the validated new-assignment form on the selected Moodle site.
 async function fillAssignment(draft) {
   const title = document.querySelector('input#id_name[name="name"]');
   const form = title?.form;

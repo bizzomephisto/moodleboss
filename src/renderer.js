@@ -47,15 +47,16 @@ function setStatus(state, message) {
   el('connection').dataset.state = state;
   const status = state === 'connected' ? 'Moodle connected' : state === 'loading' ? 'Checking Moodle…' :
     snapshot ? 'Showing saved data' : state === 'login' ? 'Sign in required' : 'Moodle unavailable';
-  el('status-text').textContent = environment.live ? `Live · ${state === 'connected' ? 'Read-only' : status}` : status;
+  const liveAccess = environment.readOnly ? 'Read-only' : 'Editing enabled';
+  el('status-text').textContent = environment.live ? `Live · ${state === 'connected' ? liveAccess : status}` : status;
   el('connection').title = message;
   el('connection').setAttribute('aria-label', message);
   el('connect').hidden = state === 'connected' || state === 'loading';
   el('connect').textContent = snapshot ? 'Reconnect' : 'Connect to Moodle';
   if (environment.live) {
     el('moodle-connect-hint').textContent = state === 'error' ? message : environment.microsoft ?
-      'Sign in with your university Microsoft account to test the read-only dashboard.' :
-      `Sign in to ${new URL(environment.site).host} to test the read-only dashboard.`;
+      'Sign in with your university Microsoft account to open the Live Moodle dashboard.' :
+      `Sign in to ${new URL(environment.site).host} to open the Live Moodle dashboard.`;
   }
 }
 
@@ -150,19 +151,19 @@ function renderCourseTree(courses) {
     assignmentSummary.append(node('span', 'draft-count', numberFormat.format(assignments.length)));
     assignmentGroup.append(assignmentSummary);
     items.append(assignmentGroup);
-    if (!environment.live) addControl('new-assignment', button('New assignment', 'tree-link tree-new', () => {
+    if (!environment.readOnly) addControl('new-assignment', button('New assignment', 'tree-link tree-new', () => {
       setView('builder');
       window.dispatchEvent(new CustomEvent('workspace:new-draft', { detail: course.id }));
     }), assignmentGroup);
     for (const assignment of assignments) {
-      const link = environment.live ? node('div', 'tree-link', assignment.title) :
+      const link = environment.readOnly ? node('div', 'tree-link', assignment.title) :
         button(assignment.title, 'tree-link', () => window.workspace.open('assignment', assignment.id));
       if (assignment.submitted !== null && assignment.needsGrading !== null) {
         link.append(node('small', 'tree-count', `${assignment.submitted} submitted · ${assignment.needsGrading} to grade`));
       }
       addControl(`assignment-${assignment.id}`, link, assignmentGroup);
     }
-    if (!environment.live) {
+    if (!environment.readOnly) {
       items.append(node('p', 'tree-label', 'Announcements'));
       addControl('announcements', button('Open in Moodle', 'tree-link', () => window.workspace.open('announcements', course.id)));
     }
@@ -191,7 +192,7 @@ function render() {
   el('title').textContent = course?.title ?? 'Teaching overview';
   el('subtitle').textContent = course ? 'Assignments and upcoming activities in this course.' :
     'Assignments, submissions, and upcoming activities for your current courses.';
-  el('open-course').hidden = environment.live || !course;
+  el('open-course').hidden = environment.readOnly || !course;
   el('empty').hidden = Boolean(snapshot);
   el('dashboard').hidden = !snapshot;
   if (!snapshot) return;
@@ -214,12 +215,12 @@ function render() {
     const row = node('article', 'assignment');
     const top = node('div', 'assignment-top');
     const details = node('div');
-    const title = environment.live ? node('p', 'item-title', item.title) :
+    const title = environment.readOnly ? node('p', 'item-title', item.title) :
       button(item.title, 'item-title', () => window.workspace.open('assignment', item.id));
     const metadata = [!course && courseNames.get(item.courseId), item.due ? `Due ${item.due}` : 'No due date'];
     details.append(title, node('p', 'item-meta', metadata.filter(Boolean).join(' · ')));
     top.append(details);
-    if (!environment.live) {
+    if (!environment.readOnly) {
       const actions = node('div', 'assignment-actions');
       if (item.canGrade) actions.append(button('Open grading', 'row-button', () => window.workspace.open('grading', item.id)));
       const manage = button('Manage', 'row-button', () => openAssignmentControls(item));
@@ -248,7 +249,7 @@ function render() {
     badge.dateTime = date.toISOString();
     badge.append(node('strong', '', date.getDate()));
     const details = node('div');
-    details.append(environment.live ? node('p', 'item-title', item.title) :
+    details.append(environment.readOnly ? node('p', 'item-title', item.title) :
       button(item.title, 'item-title', () => window.workspace.open('event', item.id)),
       node('p', 'item-meta', [item.course, timeFormat.format(date)].filter(Boolean).join(' · ')));
     row.append(badge, details);
@@ -425,6 +426,7 @@ const liveUrl = el('live-moodle-url');
 const environmentStatus = el('moodle-environment-status');
 const applyEnvironment = el('apply-moodle-environment');
 const forgetMoodleSession = el('forget-moodle-session');
+const readOnly = el('live-read-only');
 
 function updateEnvironmentFields() {
   el('live-moodle-fields').hidden = !liveToggle.checked;
@@ -446,22 +448,44 @@ function showEnvironment(next) {
   liveToggle.checked = next.live;
   liveUrl.value = next.site;
   updateEnvironmentFields();
-  el('moodle-environment').textContent = next.live ? 'Live Moodle · Read-only' : 'Local sandbox · Moodle 4.5';
+  const liveAccess = next.readOnly ? 'Read-only' : 'Editing enabled';
+  el('moodle-environment').textContent = next.live ? `Live Moodle · ${liveAccess}` : 'Local sandbox · Moodle 4.5';
   el('moodle-connect-hint').textContent = 'Sign in to the sandbox to see your courses, upcoming activities, and grading queue.';
   environmentStatus.dataset.error = 'false';
   environmentStatus.textContent = next.live ? `Live Moodle · ${next.site}` : 'Sandbox is active.';
   forgetMoodleSession.hidden = !next.live;
+  el('live-read-only-settings').hidden = !next.live;
+  readOnly.checked = Boolean(next.readOnly);
   setDashboard(next);
   setStatus('loading', 'Checking Moodle…');
   return refresh();
 }
 
 liveToggle.addEventListener('change', updateEnvironmentFields);
+readOnly.addEventListener('change', async () => {
+  readOnly.disabled = true;
+  applyEnvironment.disabled = true;
+  forgetMoodleSession.disabled = true;
+  try {
+    const result = await window.workspace.setMoodleReadOnly(readOnly.checked);
+    if (!result.ok) throw new Error(result.message);
+    showEnvironment(result.value);
+  } catch (error) {
+    readOnly.checked = environment.readOnly;
+    environmentStatus.dataset.error = 'true';
+    environmentStatus.textContent = error.message;
+  } finally {
+    readOnly.disabled = false;
+    applyEnvironment.disabled = false;
+    forgetMoodleSession.disabled = false;
+  }
+});
 el('moodle-environment-form').addEventListener('submit', async event => {
   event.preventDefault();
   liveToggle.disabled = true;
   applyEnvironment.disabled = true;
   forgetMoodleSession.disabled = true;
+  readOnly.disabled = true;
   updateEnvironmentFields();
   try {
     const result = await window.workspace.configure(liveToggle.checked, liveUrl.value);
@@ -474,12 +498,14 @@ el('moodle-environment-form').addEventListener('submit', async event => {
     liveToggle.disabled = false;
     applyEnvironment.disabled = false;
     forgetMoodleSession.disabled = false;
+    readOnly.disabled = false;
     updateEnvironmentFields();
   }
 });
 forgetMoodleSession.addEventListener('click', async () => {
   forgetMoodleSession.disabled = true;
   applyEnvironment.disabled = true;
+  readOnly.disabled = true;
   try {
     const result = await window.workspace.forgetMoodleSession();
     if (!result.ok) throw new Error(result.message);
@@ -491,6 +517,7 @@ forgetMoodleSession.addEventListener('click', async () => {
   } finally {
     forgetMoodleSession.disabled = false;
     applyEnvironment.disabled = false;
+    readOnly.disabled = false;
   }
 });
 

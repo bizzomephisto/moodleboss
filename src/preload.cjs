@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('workspace', {
   environment: () => ipcRenderer.invoke('moodle:environment'),
   openRepository: () => ipcRenderer.invoke('workspace:open-repository'),
   configure: (live, site) => ipcRenderer.invoke('moodle:configure', live, site),
+  setMoodleReadOnly: readOnly => ipcRenderer.invoke('moodle:read-only', readOnly),
   forgetMoodleSession: () => ipcRenderer.invoke('moodle:forget-session'),
   setCourseVisibility: (scope, id, visible) => ipcRenderer.invoke('workspace:course-visibility', scope, id, visible),
   setCourseColor: (scope, id, color) => ipcRenderer.invoke('workspace:course-color', scope, id, color),

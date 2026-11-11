@@ -1,7 +1,7 @@
 # MoodleBOSS
 
-MoodleBOSS is a desktop workspace for the Moodle 4.5 sandbox with a read-only
-test mode for live Moodle sites.
+MoodleBOSS is a desktop workspace for the Moodle 4.5 sandbox and live Moodle
+sites.
 
 ## Run a portable build
 
@@ -50,7 +50,10 @@ one), and select **Apply environment**. Close Settings and choose
 Microsoft sign-in for `https://moodle.louisiana.edu`.
 
 Live mode reads your dashboard, assignment counts, and upcoming activities.
-Assignment management and publishing are available in Sandbox. MoodleBOSS
+Live Moodle starts in read-only mode on every launch. To manage assignments on
+the live site, turn off **Read-only** in **Settings → Moodle environment**.
+New assignments open hidden in Moodle for review and require you to save them
+there. Moodle applies your account's existing permissions. MoodleBOSS
 remembers the selected environment and saves the Live Moodle sign-in when
 secure storage is available. Use **Forget Live Moodle sign-in** in Settings to
 remove it from this device. Moodle may ask you to sign in when its session
